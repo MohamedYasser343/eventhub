@@ -8,8 +8,11 @@ Each row is a proposed increment and its verification exercise. After the owner 
 
 | Playlist position (provisional) | Concept | Increment in EventHub | Acceptance / experiment |
 | --- | --- | --- | --- |
-| 1–4 | Orientation and request lifecycle | Document goals, a client/server exchange and initial system boundary. | Explain DNS/TCP/HTTP roles and request-response flow without framework magic. |
-| 5 | HTTP | Native HTTP server, /health, simple in-memory event endpoints, methods, status codes, headers, HEAD/OPTIONS, cookies/CORS experiments as covered. | Inspect raw requests/responses with curl; compare success, 404, 405, preflight, HEAD with no body; explain caching and connection behavior. |
+| 1 | Roadmap for backend from first principles | [Orientation notes](lectures/01-roadmap.md). | Explain course goals and product boundary. |
+| 2 | Walk the path of a true backend engineer | [Learning approach](lectures/02-learning-approach.md). | Explain problem-first experimentation. |
+| 3 | What is a Backend, how do they work and why do we need them? | [Backend and request lifecycle](lectures/03-what-is-a-backend.md). | Explain server, port, DNS, transport and HTTP roles. |
+| 4 | Benefits of learning backend engineering from first principles | [First-principles benefits](lectures/04-first-principles-benefits.md). | Trace an unfamiliar backend and propose a debugging experiment. |
+| 5 | [Understanding HTTP for backend engineers, where it all starts](lectures/05-http.md) | Native HTTP server, /health, simple in-memory event endpoints, methods, status codes, headers, HEAD/OPTIONS, cookies/CORS experiments as covered. | Inspect raw requests/responses with curl; compare success, 404, 405, preflight, HEAD with no body; explain caching and connection behavior. |
 | 6 | Routing | Match method and path, path parameters and query parameters; handwritten simple router. | Static vs parameterized routes, unknown/incorrect method and encoded paths. |
 | 7 | Serialization | Read request body, parse JSON, serialize responses and compare formats. | Valid/invalid JSON, unsupported media type, body size and encoding; optional binary format experiment. |
 | 8 | Authentication/authorization | User identity, login, safe password hashing, session/token comparison, role and ownership checks. | Reject unauthenticated or wrong-owner requests; distinguish 401 and 403. |

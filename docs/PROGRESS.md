@@ -4,9 +4,10 @@ Last updated: 2026-11-16.
 
 ## Current state
 - Repository initialization: documentation foundations prepared.
-- Learning: no lecture completion confirmed yet.
+- Learning: lecture 05 complete (owner confirmed 2026-11-16); reference notes for 01–04 prepared, completion not confirmed.
 - Implementation: not started.
-- Next learning and implementation milestone: playlist position 5 — HTTP (confirm exact video scope before implementation).
+- Next learning milestone: playlist position 6 — Routing (verify video scope).
+- Next implementation milestone: lecture 05 — HTTP; see [practical assignment](lectures/05-http.md).
 - Backend language: undecided; TypeScript/native Node HTTP is initial recommendation.
 - Frontend: deferred until backend curriculum completion and explicit owner approval.
 - Tests/benchmarks: none executed; no code yet.
@@ -15,8 +16,11 @@ Last updated: 2026-11-16.
 Track learning and implementation independently. Status values: not started, in progress, blocked, awaiting learner review, complete. Learning marked complete means the owner confirmed the session and its notes were documented; implementation marked complete means the assignment has demonstrated acceptance criteria and owner confirmation. Neither implies the other.
 | Position | Learning status | Implementation status | Learning note / evidence | Implementation evidence |
 | --- | --- | --- | --- | --- |
-| 1–4 | Not confirmed | Not confirmed | Owner may record prior study. | — |
-| 5 | Not started | Not started | — | — |
+| 1 | Not confirmed | Not confirmed | [Roadmap](lectures/01-roadmap.md) — reference | — |
+| 2 | Not confirmed | Not confirmed | [Learning approach](lectures/02-learning-approach.md) — reference | — |
+| 3 | Not confirmed | Not confirmed | [What is a backend?](lectures/03-what-is-a-backend.md) — reference | — |
+| 4 | Not confirmed | Not confirmed | [First principles benefits](lectures/04-first-principles-benefits.md) — reference | — |
+| 5 | Complete | Not started | [Understanding HTTP](lectures/05-http.md), 2026-11-16; no open technical questions recorded; full transcript unverified. | — |
 | 6 | Not started | Not started | — | — |
 | 7 | Not started | Not started | — | — |
 | 8 | Not started | Not started | — | — |
