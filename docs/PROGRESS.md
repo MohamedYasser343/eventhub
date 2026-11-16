@@ -4,9 +4,9 @@ Last updated: 2026-11-16.
 
 ## Current state
 - Repository initialization: documentation foundations prepared.
-- Learning: lecture 05 complete (owner confirmed 2026-11-16); reference notes for 01–04 prepared, completion not confirmed.
+- Learning: lectures 05–06 complete (owner confirmed 2026-11-16); reference notes for 01–04 prepared, completion not confirmed.
 - Implementation: not started.
-- Next learning milestone: playlist position 6 — Routing (verify video scope).
+- Next learning milestone: playlist position 7 (provisional: Serialization; verify actual video title and scope).
 - Next implementation milestone: lecture 05 — HTTP; see [practical assignment](lectures/05-http.md).
 - Backend language: undecided; TypeScript/native Node HTTP is initial recommendation.
 - Frontend: deferred until backend curriculum completion and explicit owner approval.
@@ -21,7 +21,7 @@ Track learning and implementation independently. Status values: not started, in 
 | 3 | Not confirmed | Not confirmed | [What is a backend?](lectures/03-what-is-a-backend.md) — reference | — |
 | 4 | Not confirmed | Not confirmed | [First principles benefits](lectures/04-first-principles-benefits.md) — reference | — |
 | 5 | Complete | Not started | [Understanding HTTP](lectures/05-http.md), 2026-11-16; no open technical questions recorded; full transcript unverified. | — |
-| 6 | Not started | Not started | — | — |
+| 6 | Complete | Not started | [Routing](lectures/06-routing.md), 2026-11-16; Express/Laravel matching discussion recorded; full transcript unavailable. | — |
 | 7 | Not started | Not started | — | — |
 | 8 | Not started | Not started | — | — |
 | 9 | Not started | Not started | — | — |
