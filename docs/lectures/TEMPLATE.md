@@ -1,27 +1,46 @@
 # Video NN — Exact lecture title
 
 - Video URL:
+- Playlist position (verified):
 - Date:
-- Status:
-- Git commit:
+- Learning status:
+- Implementation status:
+- Source availability / verification limitations:
 
-## Concepts
-Explain in your own words. Distinguish lecture content from additional research.
+## Learning objectives
+What should the learner be able to explain independently?
 
-## Problem in EventHub
-What concrete issue does the concept solve?
+## Concepts and internal mechanisms
+Explain in your own words: problem first, why it exists, what happens internally and at runtime, what happens without it, alternatives, trade-offs and when to use it. Distinguish verified lecture content from supplementary research. Use concise examples and Mermaid diagrams where helpful.
 
-## Exercise
-Scope, implementation steps and acceptance criteria. Identify deliberately deferred work.
+## Production behavior and failure scenarios
+Relevant limitations, edge cases, security and reliability implications.
 
-## Experiments and evidence
-Command, environment, expected vs observed result, including negative/failure case. Record regression checks. Mark anything not run.
+## Discussion and misconceptions
+Important questions raised during the learning session, answers, corrections and unresolved questions.
 
-## Reflection
-Why does this work? What happens on failure? Alternatives/trade-offs? What would change in production? Questions to revisit.
+## Key takeaways and references
+Revision notes and reliable sources.
 
-## Completion
-- [ ] Implementation or reproducible experiment
-- [ ] Negative case and regression checks as applicable
-- [ ] Explanation and trade-offs
-- [ ] Progress updated and learner confirmed
+## EventHub practical assignment — coding agent handoff
+- Problem and learning goal:
+- In scope / expected behavior:
+- Suggested incremental exercise:
+- Acceptance criteria (observable and testable):
+- Experiments (including negative/failure cases):
+- Important edge cases:
+- Out of scope / deliberately deferred:
+- Prerequisites or unresolved decisions:
+
+## Learning completion (ChatGPT)
+- [ ] Owner explicitly confirmed the lecture is finished.
+- [ ] Conceptual notes, discussion and assignment documented.
+- [ ] Learning status updated independently in docs/PROGRESS.md.
+
+## Implementation evidence (coding agent; initially pending)
+Preserve teaching material above. Record changes, environment, commands, expected vs observed results, negative cases, regression checks, decisions and links to evidence/commits. Mark anything not run.
+
+- [ ] Implementation or reproducible experiment.
+- [ ] Acceptance criteria demonstrated.
+- [ ] Negative cases and regression checks as applicable.
+- [ ] Implementation progress updated and learner confirmed.

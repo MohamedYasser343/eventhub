@@ -4,7 +4,7 @@ Course: [Backend from first principles — Sriniously](https://www.youtube.com/p
 
 This is the agreed **provisional** implementation roadmap, not a verified transcript or exact live playlist index. YouTube did not expose the full video list during setup. Before each lesson, verify its title and topics against the actual video; adjust the row and preserve sequence if the course differs, adds videos or splits topics. Later positions are especially provisional. Do not treat course topic numbers as playlist positions. Secondary overview: https://github.com/hammadpathan/Learning-Backend-from-First-Principles (learner notes, not authoritative). Cover missing topics in the applicable actual video, not by skipping ahead.
 
-Each row is a proposed increment and its verification exercise. Add an actual lecture note and evidence only after working through that lesson.
+Each row is a proposed increment and its verification exercise. After the owner confirms a learning session is finished, ChatGPT commits the actual lecture note and scoped assignment to main. This note is the canonical handoff for the coding agent; the roadmap is a provisional outline. Implementation evidence is added separately after practical work.
 
 | Playlist position (provisional) | Concept | Increment in EventHub | Acceptance / experiment |
 | --- | --- | --- | --- |
@@ -37,7 +37,7 @@ Each row is a proposed increment and its verification exercise. Add an actual le
 | 30 | Webhooks | Mock payment callbacks with signatures, replay defense and idempotent state changes. | Reject invalid signatures; repeated/late callback cannot duplicate confirmation or oversell. |
 | 31+ | DevOps/remaining curriculum | Containerize and automate checks, migrations and deployment/rollback when applicable. | Reproducible setup, health probe, tested deployment path. |
 
-Additional coverage if split into distinct videos: request context, CRUD, business logic layer and transactional email should each receive their own incremental exercise. Confirm actual sequence first. For every video, use docs/lectures/TEMPLATE.md and update PROGRESS; merely reading or installing a library is not completion.
+Additional coverage if split into distinct videos: request context, CRUD, business logic layer and transactional email should each receive their own incremental exercise. Confirm actual sequence first. For every video, use docs/lectures/TEMPLATE.md and update PROGRESS; merely reading or installing a library is not implementation completion. Track learning and implementation separately.
 
 ## After the backend curriculum
 Owner reviews milestones, outstanding gaps, API and invariants. Only then select frontend stack, design attendee/organizer/admin screens, integrate real backend endpoints, verify full-stack workflows, and consider deployment. No frontend implementation now.

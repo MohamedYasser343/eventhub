@@ -6,6 +6,10 @@ A backend-first, evolving event booking and ticketing platform built from first 
 
 Follow [Backend from first principles by Sriniously](https://www.youtube.com/playlist?list=PLui3EUkuMTPgZcV0QhQrOcwMPcBCcd_Q1), adding a small implementation or experiment after each video, especially positions 5–30. Start simple, measure behavior, and introduce abstractions only when their underlying problem is understood.
 
+## Learning-to-implementation workflow
+
+ChatGPT teaches and discusses each lecture, then on explicit learner confirmation commits its notes and practical assignment to main under [docs/lectures/](docs/lectures/). Coding agents use those notes to implement the scoped exercise, review, test and record implementation evidence. [Progress](docs/PROGRESS.md) tracks learning and implementation independently. See [AGENTS.md](AGENTS.md) for the full handoff rules.
+
 ## Project status
 
 Planning only. First implementation milestone: HTTP (video 5). No application features implemented yet.
