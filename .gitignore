@@ -1,0 +1,16 @@
+# Local secrets and environment configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Node / build artifacts (if selected)
+node_modules/
+dist/
+coverage/
+*.log
+
+# Editor and OS artifacts
+.DS_Store
+.idea/
