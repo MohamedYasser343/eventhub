@@ -17,7 +17,8 @@ Owner chose Node/TypeScript with `node:http` (no web framework). For running Typ
 
 ## Trade-offs and consequences
 - `tsx` and `typescript`/`@types/node` are dev dependencies only; no runtime dependency, no framework.
-- `tsx` does not type-check; `typescript` is installed so `tsc --noEmit` can be added when wanted (not configured yet).
+- `tsx` does not type-check; type safety comes from `npm run typecheck` (`tsc --noEmit`, strict), which must be run explicitly.
+- The `esbuild` postinstall script (pulled in by `tsx`) is denied via `allowScripts`; verified `tsx` works without it.
 - Switching to native Node execution later is a small change (scripts only), so the decision is reversible.
 - Binding to loopback keeps the learning server off the local network.
 
