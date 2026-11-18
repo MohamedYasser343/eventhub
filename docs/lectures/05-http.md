@@ -254,8 +254,16 @@ Use a minimal event model (id, name, seats) and in-memory collection. Path/metho
 - [x] Concepts, discussion and assignment documented.
 - [x] Learning status updated independently in PROGRESS.md.
 
-## Implementation evidence (coding agent; pending)
+## Implementation evidence (coding agent; in progress)
 No code, tests, experiments or benchmarks were executed during documentation.
+
+### Step 1 — server and `/health` (2026-11-18)
+Decisions: [ADR-001](../decisions/001-backend-language-and-tooling.md). Code: `backend/src/server.ts`, tests: `backend/test/health.test.ts`. Environment: Node v24.22.1, Linux.
+- `cd backend && npm test`: 3 tests passed, 0 failed (GET /health 200 JSON; POST /health 405 with `Allow: GET`; unknown path 404).
+- `PORT=8080 npm start`, then `curl -sv --http1.1 http://localhost:8080/health`: request line `GET /health HTTP/1.1`; response `HTTP/1.1 200 OK`, `Content-Type: application/json; charset=utf-8`, `Content-Length: 15`, `Connection: keep-alive`, `Keep-Alive: timeout=5`, body `{"status":"ok"}`.
+- `curl -i -X POST /health`: `405 Method Not Allowed` with `Allow: GET`. `curl -i /nope`: `404 Not Found`.
+- Limitations: only `/health` exists; no events, validation, CORS, ETag or HEAD/OPTIONS yet. No type-check configured. Owner confirmation pending.
+
 - [ ] Implementation or reproducible experiment.
 - [ ] Acceptance criteria demonstrated.
 - [ ] Negative cases and regression checks.

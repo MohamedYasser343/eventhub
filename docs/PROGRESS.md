@@ -1,16 +1,16 @@
 # Progress tracker
 
-Last updated: 2026-11-16.
+Last updated: 2026-11-18.
 
 ## Current state
 - Repository initialization: documentation foundations prepared.
 - Learning: lectures 05–06 complete (owner confirmed 2026-11-16); reference notes for 01–04 prepared, completion not confirmed.
-- Implementation: not started.
+- Implementation: lecture 05 in progress (step 1: server and /health verified; ADR-001 accepted).
 - Next learning milestone: playlist position 7 (provisional: Serialization; verify actual video title and scope).
 - Next implementation milestone: lecture 05 — HTTP; see [practical assignment](lectures/05-http.md).
-- Backend language: undecided; TypeScript/native Node HTTP is initial recommendation.
+- Backend language: Node/TypeScript, native `node:http`, `tsx` dev runner ([ADR-001](decisions/001-backend-language-and-tooling.md)).
 - Frontend: deferred until backend curriculum completion and explicit owner approval.
-- Tests/benchmarks: none executed; no code yet.
+- Tests/benchmarks: node:test health tests pass (3/3); no benchmarks.
 
 ## Milestones
 Track learning and implementation independently. Status values: not started, in progress, blocked, awaiting learner review, complete. Learning marked complete means the owner confirmed the session and its notes were documented; implementation marked complete means the assignment has demonstrated acceptance criteria and owner confirmation. Neither implies the other.
@@ -20,7 +20,7 @@ Track learning and implementation independently. Status values: not started, in 
 | 2 | Not confirmed | Not confirmed | [Learning approach](lectures/02-learning-approach.md) — reference | — |
 | 3 | Not confirmed | Not confirmed | [What is a backend?](lectures/03-what-is-a-backend.md) — reference | — |
 | 4 | Not confirmed | Not confirmed | [First principles benefits](lectures/04-first-principles-benefits.md) — reference | — |
-| 5 | Complete | Not started | [Understanding HTTP](lectures/05-http.md), 2026-11-16; no open technical questions recorded; full transcript unverified. | — |
+| 5 | Complete | In progress | [Understanding HTTP](lectures/05-http.md), 2026-11-16; no open technical questions recorded; full transcript unverified. | [Step 1 evidence](lectures/05-http.md#step-1--server-and-health-2026-11-18) |
 | 6 | Complete | Not started | [Routing](lectures/06-routing.md), 2026-11-16; Express/Laravel matching discussion recorded; full transcript unavailable. | — |
 | 7 | Not started | Not started | — | — |
 | 8 | Not started | Not started | — | — |
