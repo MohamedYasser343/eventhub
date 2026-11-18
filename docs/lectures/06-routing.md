@@ -195,7 +195,7 @@ Use the path syntax appropriate to the chosen language. Preserve previous unvers
 ## Implementation evidence (coding agent; awaiting learner review)
 Date: 2026-11-18. Environment: Linux, Node via `tsx`, native `node:http`, no new dependencies. Decisions: [ADR-005](../decisions/005-router-and-api-versioning.md). Code: `backend/src/router.ts`, route table and v1 handlers in `backend/src/server.ts`. Tests: `backend/test/router.test.ts` (pure router), `backend/test/routing-v1.test.ts` (HTTP).
 
-Commands run: `cd backend && npm run typecheck` (clean) and `npm test`: 98 tests, 98 pass, 0 fail (64 earlier tests unchanged and passing, 34 new). No benchmarks.
+Commands run: `cd backend && npm run typecheck` (clean) and `npm test`: 101 tests, 101 pass, 0 fail (64 earlier tests unchanged and passing, 37 new). No benchmarks.
 
 ### Steps 1-2 — dispatcher, route table, parameters
 Route records (method, segments, constraints, handler) replace the if-chain. `:id` is extracted per segment. GET and POST on the same path dispatch to different handlers (tests: "same path, different methods…", "GET and POST on the same v1 path…"). `Allow` is derived from the table; lecture 05 `Allow` strings are unchanged and their tests pass.
@@ -229,6 +229,11 @@ Trailing slash, empty id, extra segments, upper-case path, `//api/v1/events`, `%
 
 ### Why the router needs no database, and routing miss vs lookup miss
 `match()` takes two strings and compares them with registered patterns; nothing about the event's existence is known there. `/api/v1/events/42` matches the route (`id = 42`), then the handler looks in the store and returns 404. `/api/v1/events/abc` never reaches a handler. Both are 404 here; they differ in where the decision is made.
+
+### Review fixes (2026-11-18, after a review of PR #2)
+- `PATCH` merged into a copy read before the body arrived, so a concurrent `PUT` could be overwritten. It now re-reads the event after the body; a test with a slow `PATCH` and a `PUT` in between fails without the fix and passes with it.
+- An exact `HEAD` route now beats the `GET` fallback in any registration order (test added).
+- A wildcard no longer matches `..` or an encoded `/` (test added).
 
 ### Deliberate simplifications
 - Linear scan over routes, not measured; no trie. No middleware.

@@ -13,7 +13,9 @@
 // - A malformed percent escape is reported as "bad-request", not as a crash.
 // - Matching is case-sensitive; there is no trailing-slash or empty-segment
 //   normalisation ("/events/" and "/events//1" simply do not match).
-// - HEAD is served by a GET route unless a HEAD route is registered.
+// - HEAD is served by a GET route unless a HEAD route is registered for the
+//   path (an exact method match wins over the GET fallback, in any order).
+// - A wildcard value never contains ".." or an encoded "/" (no match instead).
 
 export type Constraints = Record<string, RegExp>;
 
@@ -69,6 +71,8 @@ function matchSegments<H>(
       // One or more remaining segments; the value is the decoded segments
       // joined with "/". Handlers must not treat it as a file path unchecked.
       if (segs.length <= i) return null;
+      // A decoded "%2F" or ".." would smuggle a traversal past the URL parser.
+      if (segs.slice(i).some((s) => s === ".." || s.includes("/"))) return null;
       params["*"] = segs.slice(i).join("/");
       return params;
     }
@@ -133,16 +137,18 @@ export class Router<H> implements Registrar<H> {
     }
 
     const methods = new Set<string>();
-    let found: { route: Route<H>; params: Record<string, string> } | undefined;
+    type Hit = { route: Route<H>; params: Record<string, string> };
+    let exact: Hit | undefined; // first route with this exact method
+    let viaGet: Hit | undefined; // HEAD only: first GET route, used if no HEAD route
     for (const route of this.routes) {
       const params = matchSegments(route, segs);
       if (!params) continue;
       methods.add(route.method);
       if (route.method === "GET") methods.add("HEAD");
-      const fits =
-        route.method === method || (method === "HEAD" && route.method === "GET");
-      if (fits && !found) found = { route, params };
+      if (route.method === method) exact ??= { route, params };
+      else if (method === "HEAD" && route.method === "GET") viaGet ??= { route, params };
     }
+    const found = exact ?? viaGet;
 
     const allow = [
       ...METHOD_ORDER.filter((m) => methods.has(m)),

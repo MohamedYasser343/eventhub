@@ -363,8 +363,9 @@ function bookingStub(req: IncomingMessage, res: ServerResponse): void {
 // PATCH changes only the fields sent (name and/or seats); the merged result is
 // validated like a full event, and nothing is stored if it is invalid.
 async function patchEvent(id: number, req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const current = events.find((e) => e.id === id);
-  if (!current) return sendJson(res, 404, { error: "Not Found" }, ignoredBodyHeaders(req));
+  if (!events.some((e) => e.id === id)) {
+    return sendJson(res, 404, { error: "Not Found" }, ignoredBodyHeaders(req));
+  }
 
   const body = await readJson(req, res);
   if (!body) return;
@@ -376,6 +377,10 @@ async function patchEvent(id: number, req: IncomingMessage, res: ServerResponse)
     });
   }
   const { name, seats } = v as Record<string, unknown>;
+  // Merge into the event as it is NOW, not as it was before the body arrived:
+  // another request may have changed it while we waited (no lost update).
+  const current = events.find((e) => e.id === id);
+  if (!current) return sendJson(res, 404, { error: "Not Found" });
   const result = validateNewEvent({
     name: name === undefined ? current.name : name,
     seats: seats === undefined ? current.seats : seats,

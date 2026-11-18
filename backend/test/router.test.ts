@@ -156,3 +156,22 @@ test("query parsing: repeated keys are kept, scalar() rejects repeats", () => {
   // The router only ever sees the pathname, so a query cannot change dispatch.
   assert.equal(pick(build().match("GET", "/events")), "list");
 });
+
+test("HEAD: an exact HEAD route wins over GET in either registration order", () => {
+  for (const headFirst of [true, false]) {
+    const r = new Router<string>();
+    if (headFirst) { r.add("HEAD", "/x", "head"); r.add("GET", "/x", "get"); }
+    else { r.add("GET", "/x", "get"); r.add("HEAD", "/x", "head"); }
+    assert.equal(pick(r.match("HEAD", "/x")), "head");
+    assert.equal(pick(r.match("GET", "/x")), "get");
+  }
+});
+
+test("wildcard never yields '..' or an encoded slash", () => {
+  const r = new Router<string>();
+  r.add("GET", "/files/*", "catch-all");
+  assert.equal(r.match("GET", "/files/..%2F..%2Fetc").kind, "not-found");
+  assert.equal(r.match("GET", "/files/a/%2E%2E/b").kind, "not-found");
+  assert.equal(r.match("GET", "/files/a%2Fb").kind, "not-found");
+  assert.equal(r.match("GET", "/files/a/b").kind, "match");
+});

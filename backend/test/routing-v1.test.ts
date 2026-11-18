@@ -163,3 +163,40 @@ test("encoded segments and malformed escapes: documented, no crash", async () =>
   assert.equal(await raw("//api/v1/events"), 404); // not a host
   assert.equal(await raw("/health"), 200); // still alive afterwards
 });
+
+test("PATCH merges into the event as it is after the body arrives (no lost update)", async () => {
+  const create = await fetch(v1("/events"), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "Race Me", seats: 10 }),
+  });
+  const { id } = (await create.json()) as { id: number };
+  const json = JSON.stringify({ name: "Renamed" });
+  const { port } = new URL(api.base);
+
+  // Slow PATCH: headers and half the body now, the rest after a PUT has landed.
+  const patchDone = new Promise<number>((resolve, reject) => {
+    const req = http.request(
+      {
+        host: "127.0.0.1", port: Number(port), method: "PATCH", path: `/api/v1/events/${id}`,
+        headers: { "content-type": "application/json", "content-length": Buffer.byteLength(json) },
+      },
+      (res) => { res.resume(); resolve(res.statusCode ?? 0); },
+    );
+    req.on("error", reject);
+    req.write(json.slice(0, 5));
+    setTimeout(async () => {
+      await fetch(v1(`/events/${id}`), {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "Race Me", seats: 50 }),
+      });
+      req.end(json.slice(5));
+    }, 50);
+  });
+
+  assert.equal(await patchDone, 200);
+  const final = (await (await fetch(v1(`/events/${id}`))).json()) as { name: string; seats: number };
+  assert.deepEqual(final, { id, name: "Renamed", seats: 50 }); // PUT's seats survived
+  await fetch(v1(`/events/${id}`), { method: "DELETE" });
+});
