@@ -285,7 +285,7 @@ Owner decisions recorded in [ADR-002](../decisions/002-event-creation-rules.md).
 - `npm test`: 31 passed, 0 failed. `npm run typecheck`: exit 0.
 - Positive: valid POST -> `201`, `Location: /events/3`, body `{"id":3,"name":"Synthetic Concert","seats":50}`; the same POST repeated -> a new event with id 4 (non-idempotent); the list then contained both.
 - Negative (none mutate the store, checked in tests): `Content-Type: text/plain` -> 415; body `{` -> 400 `{"error":"Malformed JSON"}`; `{"name":"  ","seats":-1}` -> 422 with two `details`; 20 KB body -> 413. Tests also cover non-object JSON, missing/wrong-typed fields, 101-char name, fractional/string/null/oversized seats, and a streamed body without `Content-Length` (413).
-- Not covered: concurrent POST races (Node runs handlers on one thread and the store update has no `await`, so it is atomic here; no stress test was run); no server timeouts configured for slow bodies.
+- Not covered: concurrent POST races (Node runs handlers on one thread and the store update has no `await`, so it is atomic here; no stress test was run); Node's default timeouts apply to slow bodies (`requestTimeout` 300 s, `headersTimeout` 60 s, `keepAliveTimeout` 5 s, read from a Node 24 `http.Server`); none were tuned and the number of connections is not capped.
 - Limitations: in-memory only; no idempotency key; owner confirmation pending.
 
 ### Step 5 — `PUT` and `DELETE` on `/events/:id` (2026-11-18)
@@ -326,6 +326,13 @@ Owner decisions and implementation choices: [ADR-004](../decisions/004-head-opti
 - Automated equivalent: tests count server `connection` events: 3 sequential requests on a keep-alive agent -> 1 connection; with `Connection: close` -> 3.
 
 **Not covered / limitations:** no gzip (deferred); no stress test for concurrent writes; no `If-Match`; the browser run used one browser (Chromium-based in-app) and I did not test other browsers; not production-ready (in-memory, no auth).
+
+### Review fixes (2026-11-18, after a review of PR #1)
+- **Fixed:** request targets starting with `//` were parsed as `//host/path`, so `GET //x/events` and `GET //evil.example/events/1` returned 200 (found by probing with `curl --path-as-is`). Origin-form targets are now parsed against a fixed host and return 404; absolute-form targets are still accepted (RFC 9112). A test for `//` fails on the old parsing (checked in a scratch copy).
+- **Added tests:** a PUT whose event is deleted while its body is still arriving returns 404 (fails if the second lookup in `replaceEvent` is removed; 10/10 reruns passed); a preflight for `PUT` and `DELETE` on `/events/1`.
+- **Corrected:** the step 4 note about timeouts (see above).
+- **Refactor:** the server start/stop setup shared by all test files is now `backend/test/helpers.ts`; the refactor alone took the test code from 666 to 642 lines (24 fewer, helper included); after the new tests the total is 710 lines.
+- `npm test`: 64 passed, 0 failed. `npm run typecheck`: exit 0.
 
 ## Implementation checklist (coding agent)
 - [x] Implementation or reproducible experiment (`backend/`, `backend/README.md`).

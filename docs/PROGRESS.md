@@ -10,7 +10,7 @@ Last updated: 2026-11-18.
 - Next implementation milestone: owner review and confirmation of lecture 05 (see [assignment](lectures/05-http.md)); then lecture 06 — Routing.
 - Backend language: Node/TypeScript, native `node:http`, `tsx` dev runner ([ADR-001](decisions/001-backend-language-and-tooling.md)).
 - Frontend: deferred until backend curriculum completion and explicit owner approval.
-- Tests/benchmarks: `npm test` 60/60 passing and `npm run typecheck` clean; no benchmarks.
+- Tests/benchmarks: `npm test` 64/64 passing and `npm run typecheck` clean; no benchmarks.
 
 ## Milestones
 Track learning and implementation independently. Status values: not started, in progress, blocked, awaiting learner review, complete. Learning marked complete means the owner confirmed the session and its notes were documented; implementation marked complete means the assignment has demonstrated acceptance criteria and owner confirmation. Neither implies the other.
