@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { fileURLToPath } from "node:url";
+import { parseQuery, Router, scalar } from "./router.ts";
+import type { Query, Registrar } from "./router.ts";
 
 export interface EventItem {
   id: number;
@@ -26,10 +28,8 @@ const MAX_SEATS = 100_000;
 // CORS headers, so the browser, not the server, blocks it.
 const ALLOWED_ORIGIN = process.env.CORS_ORIGIN ?? "http://localhost:3000";
 
-// Allow lists per resource (also the source of truth for preflight answers).
-const ALLOW_COLLECTION = "GET, HEAD, POST, OPTIONS";
-const ALLOW_ITEM = "GET, HEAD, PUT, DELETE, OPTIONS";
-const ALLOW_HEALTH = "GET, HEAD";
+// Allow lists are no longer hard-coded: the router derives them from the routes
+// registered for each path, so they cannot drift from what is really served.
 
 function sendJson(
   res: ServerResponse,
@@ -224,6 +224,7 @@ async function readJson(
 async function createEvent(
   req: IncomingMessage,
   res: ServerResponse,
+  prefix: string,
 ): Promise<void> {
   const body = await readJson(req, res);
   if (!body) return;
@@ -237,7 +238,7 @@ async function createEvent(
 
   const event: EventItem = { id: nextId++, ...result.value };
   events.push(event);
-  sendJson(res, 201, event, { Location: `/events/${event.id}` });
+  sendJson(res, 201, event, { Location: `${prefix}/events/${event.id}` });
 }
 
 // PUT replaces the whole event (name and seats required). The id comes from the
@@ -283,67 +284,198 @@ function deleteEvent(id: number, req: IncomingMessage, res: ServerResponse): voi
   res.end();
 }
 
+// ---------- v1-only handlers (stubs and mock data, lecture 06) ----------
+
+const PAGE_SIZE = 10;
+const SORT_FIELDS = ["id", "name", "seats"] as const;
+type SortField = (typeof SORT_FIELDS)[number];
+
+function badQuery(res: ServerResponse, details: string[]): void {
+  sendJson(res, 400, { error: "Bad Request", details });
+}
+
+// Query policy: city, sort and page are scalar (a repeated key is a 400); sort
+// is "id|name|seats" with an optional "-" for descending; page is a positive
+// integer. Unknown keys are ignored. Events have no city, so city is accepted
+// and echoed back but does not filter (deliberate simplification).
+function listEventsV1(_req: IncomingMessage, res: ServerResponse, ctx: RouteContext): void {
+  const city = scalar(ctx.query, "city");
+  const sort = scalar(ctx.query, "sort");
+  const page = scalar(ctx.query, "page");
+  const details: string[] = [];
+  if (!city.ok) details.push("city must not be repeated");
+  if (!sort.ok) details.push("sort must not be repeated");
+  if (!page.ok) details.push("page must not be repeated");
+
+  const sortText = sort.ok ? (sort.value ?? "id") : "id";
+  const sortMatch = /^(-?)(id|name|seats)$/.exec(sortText);
+  if (sort.ok && !sortMatch) details.push("sort must be id, name or seats, optionally prefixed with -");
+
+  const pageText = page.ok ? (page.value ?? "1") : "1";
+  if (page.ok && !/^[1-9][0-9]{0,8}$/.test(pageText)) details.push("page must be a positive integer");
+
+  if (details.length > 0 || !sortMatch) return badQuery(res, details);
+
+  const field = sortMatch[2] as SortField;
+  const direction = sortMatch[1] === "-" ? -1 : 1;
+  const sorted = [...events].sort((a, b) => {
+    const x = a[field];
+    const y = b[field];
+    return (x < y ? -1 : x > y ? 1 : 0) * direction;
+  });
+  const pageNumber = Number(pageText);
+  const data = sorted.slice((pageNumber - 1) * PAGE_SIZE, pageNumber * PAGE_SIZE);
+  sendJson(res, 200, {
+    data,
+    meta: { page: pageNumber, pageSize: PAGE_SIZE, total: events.length, sort: sortText, city: city.ok ? (city.value ?? null) : null },
+  });
+}
+
+// Mock search: case-insensitive substring match on the name; no q returns all.
+function searchEventsV1(_req: IncomingMessage, res: ServerResponse, ctx: RouteContext): void {
+  const q = scalar(ctx.query, "q");
+  if (!q.ok) return badQuery(res, ["q must not be repeated"]);
+  const needle = (q.value ?? "").toLowerCase();
+  sendJson(res, 200, {
+    data: events.filter((e) => e.name.toLowerCase().includes(needle)),
+    meta: { q: q.value ?? null },
+  });
+}
+
+// Synthetic tickets derived from the event; nothing is reserved or stored.
+function listTickets(_req: IncomingMessage, res: ServerResponse, ctx: RouteContext): void {
+  const id = Number(ctx.params["id"]);
+  const event = events.find((e) => e.id === id);
+  if (!event) return sendJson(res, 404, { error: "Not Found" });
+  const tickets = Array.from({ length: Math.min(event.seats, 3) }, (_, i) => ({
+    ticketId: `T-${id}-${i + 1}`,
+    eventId: id,
+    type: "general",
+  }));
+  sendJson(res, 200, { data: tickets });
+}
+
+// Booking is out of scope for this lecture: the route exists, nothing happens.
+function bookingStub(req: IncomingMessage, res: ServerResponse): void {
+  sendJson(res, 501, { error: "Not Implemented", detail: "booking is a stub" }, ignoredBodyHeaders(req));
+}
+
+// PATCH changes only the fields sent (name and/or seats); the merged result is
+// validated like a full event, and nothing is stored if it is invalid.
+async function patchEvent(id: number, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const current = events.find((e) => e.id === id);
+  if (!current) return sendJson(res, 404, { error: "Not Found" }, ignoredBodyHeaders(req));
+
+  const body = await readJson(req, res);
+  if (!body) return;
+  const v = body.value;
+  if (typeof v !== "object" || v === null || Array.isArray(v) || !("name" in v || "seats" in v)) {
+    return sendJson(res, 422, {
+      error: "Unprocessable Content",
+      details: ["body must be a JSON object with name and/or seats"],
+    });
+  }
+  const { name, seats } = v as Record<string, unknown>;
+  const result = validateNewEvent({
+    name: name === undefined ? current.name : name,
+    seats: seats === undefined ? current.seats : seats,
+  });
+  if (!result.ok) return sendJson(res, 422, { error: "Unprocessable Content", details: result.details });
+
+  const index = events.findIndex((e) => e.id === id);
+  if (index === -1) return sendJson(res, 404, { error: "Not Found" });
+  const event: EventItem = { id, ...result.value };
+  events[index] = event;
+  sendJson(res, 200, event);
+}
+
+// ---------- route table ----------
+
+export interface RouteContext {
+  params: Record<string, string>;
+  query: Query;
+  allow: string;
+  prefix: string; // "" for the legacy routes, "/api/v1" for v1
+}
+type AppHandler = (req: IncomingMessage, res: ServerResponse, ctx: RouteContext) => void | Promise<void>;
+
+// Canonical id: positive decimal, no leading zeros. Declared as a constraint so
+// a non-matching segment never reaches a handler.
+const ID = { id: /^[1-9][0-9]*$/ };
+
+const optionsHandler: AppHandler = (req, res, ctx) => handleOptions(req, res, ctx.allow);
+const idOf = (ctx: RouteContext): number => Number(ctx.params["id"]);
+
+// The event routes of lecture 05. `v1` adds the lecture 06 extras; the legacy
+// unversioned table stays exactly as lecture 05 clients know it.
+function registerEventRoutes(r: Registrar<AppHandler>, v1: boolean): void {
+  if (v1) {
+    r.add("GET", "/events", listEventsV1);
+    // Registered before "/events/:id" AND the id is constrained: two independent
+    // protections against "search" being read as an id.
+    r.add("GET", "/events/search", searchEventsV1);
+    r.add("OPTIONS", "/events/search", optionsHandler);
+  } else {
+    r.add("GET", "/events", (_req, res) => sendJson(res, 200, events));
+  }
+  r.add("POST", "/events", (req, res, ctx) => createEvent(req, res, ctx.prefix));
+  r.add("OPTIONS", "/events", optionsHandler);
+
+  r.add("GET", "/events/:id", (req, res, ctx) => {
+    const event = events.find((e) => e.id === idOf(ctx));
+    if (event) sendEvent(req, res, event);
+    else sendJson(res, 404, { error: "Not Found" });
+  }, ID);
+  r.add("PUT", "/events/:id", (req, res, ctx) => replaceEvent(idOf(ctx), req, res), ID);
+  if (v1) r.add("PATCH", "/events/:id", (req, res, ctx) => patchEvent(idOf(ctx), req, res), ID);
+  r.add("DELETE", "/events/:id", (req, res, ctx) => deleteEvent(idOf(ctx), req, res), ID);
+  r.add("OPTIONS", "/events/:id", optionsHandler, ID);
+
+  if (v1) {
+    r.add("GET", "/events/:id/tickets", listTickets, ID);
+    r.add("OPTIONS", "/events/:id/tickets", optionsHandler, ID);
+    r.add("POST", "/bookings", bookingStub);
+    r.add("OPTIONS", "/bookings", optionsHandler);
+  }
+}
+
+export const router = new Router<AppHandler>();
+router.add("GET", "/health", (_req, res) => sendJson(res, 200, { status: "ok" }));
+registerEventRoutes(router, false); // legacy, unversioned (kept for lecture 05 clients)
+registerEventRoutes(router.group("/api/v1"), true); // "/api/v2" is not implemented: 404
+
 async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
   // Origin-form targets start with "/". Parse them against a fixed host so a
   // leading "//" stays part of the path (404) instead of being read as a host,
   // which would make "//x/events" an extra URL for /events. Other forms, such
   // as absolute-form ("GET http://host/events"), still go through the parser.
   const target = req.url ?? "/";
-  const { pathname } = new URL(
+  const url = new URL(
     target.startsWith("/") ? `http://localhost${target}` : target,
     "http://localhost",
   );
   applyCors(req, res);
 
-  // HEAD is GET without a body: same status and headers (Node drops the body).
-  const readOnly = req.method === "GET" || req.method === "HEAD";
-
-  if (pathname === "/events") {
-    if (readOnly) {
-      sendJson(res, 200, events);
-    } else if (req.method === "POST") {
-      await createEvent(req, res);
-    } else if (req.method === "OPTIONS") {
-      handleOptions(req, res, ALLOW_COLLECTION);
-    } else {
-      methodNotAllowed(res, ALLOW_COLLECTION);
-    }
-    return;
+  const result = router.match(req.method ?? "GET", url.pathname);
+  switch (result.kind) {
+    case "match":
+      await result.handler(req, res, {
+        params: result.params,
+        query: parseQuery(url.searchParams),
+        allow: result.allow,
+        prefix: result.prefix,
+      });
+      return;
+    case "method-not-allowed":
+      methodNotAllowed(res, result.allow);
+      return;
+    case "bad-request":
+      sendJson(res, 400, { error: "Bad Request" });
+      return;
+    case "not-found":
+      sendJson(res, 404, { error: "Not Found" });
+      return;
   }
-
-  // Strict canonical id: positive decimal, no leading zeros, no trailing slash.
-  const eventMatch = /^\/events\/([1-9][0-9]*)$/.exec(pathname);
-  if (eventMatch) {
-    const id = Number(eventMatch[1]);
-    if (readOnly) {
-      const event = events.find((e) => e.id === id);
-      if (event) {
-        sendEvent(req, res, event);
-      } else {
-        sendJson(res, 404, { error: "Not Found" });
-      }
-    } else if (req.method === "PUT") {
-      await replaceEvent(id, req, res);
-    } else if (req.method === "DELETE") {
-      deleteEvent(id, req, res);
-    } else if (req.method === "OPTIONS") {
-      handleOptions(req, res, ALLOW_ITEM);
-    } else {
-      methodNotAllowed(res, ALLOW_ITEM);
-    }
-    return;
-  }
-
-  if (pathname === "/health") {
-    if (readOnly) {
-      sendJson(res, 200, { status: "ok" });
-    } else {
-      methodNotAllowed(res, ALLOW_HEALTH);
-    }
-    return;
-  }
-
-  sendJson(res, 404, { error: "Not Found" });
 }
 
 export const server = createServer((req, res) => {
