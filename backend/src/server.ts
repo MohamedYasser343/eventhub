@@ -284,7 +284,15 @@ function deleteEvent(id: number, req: IncomingMessage, res: ServerResponse): voi
 }
 
 async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const { pathname } = new URL(req.url ?? "/", "http://localhost");
+  // Origin-form targets start with "/". Parse them against a fixed host so a
+  // leading "//" stays part of the path (404) instead of being read as a host,
+  // which would make "//x/events" an extra URL for /events. Other forms, such
+  // as absolute-form ("GET http://host/events"), still go through the parser.
+  const target = req.url ?? "/";
+  const { pathname } = new URL(
+    target.startsWith("/") ? `http://localhost${target}` : target,
+    "http://localhost",
+  );
   applyCors(req, res);
 
   // HEAD is GET without a body: same status and headers (Node drops the body).
