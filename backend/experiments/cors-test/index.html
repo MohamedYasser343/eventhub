@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EventHub CORS test</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 16px; max-width: 760px; }
+  button { margin: 0 6px 6px 0; padding: 6px 10px; }
+  pre { background: #f3f3f3; padding: 10px; white-space: pre-wrap; border-radius: 4px; }
+  code { background: #eee; padding: 1px 4px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<h1>EventHub CORS test page</h1>
+<p>Disposable lecture-05 experiment. Page origin: <code id="origin"></code>.
+API: <code id="api"></code> (override with <code>?api=http://host:port</code>).</p>
+<p>
+  <button id="get">GET /events (simple request)</button>
+  <button id="post">POST /events (JSON, preflight)</button>
+  <button id="etag">GET /events/1 + If-None-Match</button>
+  <button id="all">Run all</button>
+</p>
+<pre id="out">Ready.</pre>
+<script>
+const api = new URLSearchParams(location.search).get("api") || "http://localhost:8080";
+document.getElementById("origin").textContent = location.origin;
+document.getElementById("api").textContent = api;
+const out = document.getElementById("out");
+const log = (line) => { out.textContent += "\n" + line; };
+
+// A rejected CORS request surfaces in JS only as a TypeError (no status, no
+// body). The DevTools console/network tab and the server log show which part
+// was blocked: the preflight, or only access to the response.
+async function attempt(label, url, init) {
+  try {
+    const res = await fetch(url, init);
+    const text = await res.text();
+    log(`${label}: OK status=${res.status} etag=${res.headers.get("ETag")} location=${res.headers.get("Location")} body=${text.slice(0, 80)}`);
+    return res;
+  } catch (err) {
+    log(`${label}: BLOCKED (${err.name}: ${err.message})`);
+    return null;
+  }
+}
+
+const doGet = () => attempt("GET /events", `${api}/events`);
+const doPost = () => attempt("POST /events", `${api}/events`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ name: "Browser CORS Test", seats: 1 }),
+});
+const doEtag = async () => {
+  const first = await attempt("GET /events/1", `${api}/events/1`);
+  const etag = first && first.headers.get("ETag");
+  if (etag) await attempt("GET /events/1 If-None-Match", `${api}/events/1`, { headers: { "If-None-Match": etag } });
+};
+
+document.getElementById("get").onclick = doGet;
+document.getElementById("post").onclick = doPost;
+document.getElementById("etag").onclick = doEtag;
+document.getElementById("all").onclick = async () => {
+  out.textContent = "Running from " + location.origin;
+  await doGet(); await doPost(); await doEtag();
+  log("done");
+};
+</script>
+</body>
+</html>
