@@ -1,6 +1,6 @@
 # ADR-005: Handwritten router, v1 prefix and legacy routes
 
-Status: Accepted (recommendations proposed by the coding agent; owner proceeded without objection, confirm at review)
+Status: Accepted
 Date: 2026-11-18
 Related lecture: [06 — Routing](../lectures/06-routing.md)
 

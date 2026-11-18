@@ -4,7 +4,7 @@
 - Playlist position: 6 ([course playlist](https://www.youtube.com/playlist?list=PLui3EUkuMTPgZcV0QhQrOcwMPcBCcd_Q1)).
 - Date: 2026-11-16
 - Learning status: complete (owner requested upload after discussion).
-- Implementation status: awaiting learner review (2026-11-18).
+- Implementation status: complete (owner confirmed 2026-11-18).
 - Source availability: lecture identity and topic were identified in the learning session from available materials and transcript excerpts; full transcript was unavailable. The explanations below synthesize the session, with framework behavior, trees, HTTP status semantics and assignment design as supplementary engineering material, not a verbatim or exhaustive account of the video. No runtime experiments or benchmarks were performed during this learning session.
 
 ## Learning objectives
@@ -192,7 +192,7 @@ Use the path syntax appropriate to the chosen language. Preserve previous unvers
 - [x] Conceptual notes, discussion and assignment documented.
 - [x] Learning status updated independently in docs/PROGRESS.md.
 
-## Implementation evidence (coding agent; awaiting learner review)
+## Implementation evidence (coding agent; complete)
 Date: 2026-11-18. Environment: Linux, Node via `tsx`, native `node:http`, no new dependencies. Decisions: [ADR-005](../decisions/005-router-and-api-versioning.md). Code: `backend/src/router.ts`, route table and v1 handlers in `backend/src/server.ts`. Tests: `backend/test/router.test.ts` (pure router), `backend/test/routing-v1.test.ts` (HTTP).
 
 Commands run: `cd backend && npm run typecheck` (clean) and `npm test`: 101 tests, 101 pass, 0 fail (64 earlier tests unchanged and passing, 37 new). No benchmarks.
@@ -245,4 +245,4 @@ Trailing slash, empty id, extra segments, upper-case path, `//api/v1/events`, `%
 - [x] Implementation or reproducible experiment.
 - [x] Acceptance criteria demonstrated (tests and curl above).
 - [x] Negative cases and regression checks.
-- [ ] Learner confirmed; implementation progress marked complete.
+- [x] Learner confirmed; implementation progress marked complete (2026-11-18).
