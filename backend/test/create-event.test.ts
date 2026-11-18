@@ -1,30 +1,25 @@
-import { after, before, beforeEach, test } from "node:test";
+import { before, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import type { AddressInfo } from "node:net";
-import { events, server } from "../src/server.ts";
+import { events } from "../src/server.ts";
 import type { EventItem } from "../src/server.ts";
+import { useServer } from "./helpers.ts";
 
-let base = "";
+const api = useServer();
+
 let seed: EventItem[] = [];
 
-before(async () => {
+before(() => {
   seed = structuredClone(events);
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 
 beforeEach(() => {
   events.splice(0, events.length, ...structuredClone(seed));
 });
 
-after(() => {
-  server.close();
-});
-
 function post(body: string, contentType: string | null = "application/json") {
   const headers: Record<string, string> = {};
   if (contentType !== null) headers["Content-Type"] = contentType;
-  return fetch(`${base}/events`, { method: "POST", headers, body });
+  return fetch(`${api.base}/events`, { method: "POST", headers, body });
 }
 
 test("valid POST returns 201, Location, JSON body and stores the event", async () => {
@@ -35,7 +30,7 @@ test("valid POST returns 201, Location, JSON body and stores the event", async (
   assert.deepEqual(created, { id: created.id, name: "Synthetic Concert", seats: 50 });
   assert.equal(events.length, seed.length + 1);
 
-  const fetched = await fetch(`${base}/events/${created.id}`);
+  const fetched = await fetch(`${api.base}/events/${created.id}`);
   assert.equal(fetched.status, 200);
   assert.deepEqual(await fetched.json(), created);
 });
@@ -133,7 +128,7 @@ test("body over 16 KB returns 413 when streamed without Content-Length", async (
       controller.close();
     },
   });
-  const res = await fetch(`${base}/events`, {
+  const res = await fetch(`${api.base}/events`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: stream,
@@ -145,7 +140,7 @@ test("body over 16 KB returns 413 when streamed without Content-Length", async (
 });
 
 test("PUT /events still returns 405 with Allow: GET, POST", async () => {
-  const res = await fetch(`${base}/events`, { method: "PUT" });
+  const res = await fetch(`${api.base}/events`, { method: "PUT" });
   assert.equal(res.status, 405);
   assert.equal(res.headers.get("allow"), "GET, HEAD, POST, OPTIONS");
 });
