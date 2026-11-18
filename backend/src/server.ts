@@ -102,39 +102,58 @@ function validateNewEvent(input: unknown): Validation {
   return { ok: true, value: { name: trimmed, seats: seats as number } };
 }
 
-async function createEvent(
+// The request body is ignored (DELETE, or PUT on a missing event). If one was
+// sent, close the connection so an unread, possibly huge body is not drained.
+function ignoredBodyHeaders(req: IncomingMessage): Record<string, string> {
+  const hasBody =
+    Number(req.headers["content-length"]) > 0 ||
+    req.headers["transfer-encoding"] !== undefined;
+  return hasBody ? { Connection: "close" } : {};
+}
+
+// Reads and parses a JSON request body. On any problem the error response
+// (415/413/400) has already been sent and null is returned. Wrapping the value
+// lets a legitimate JSON `null` body be told apart from failure.
+async function readJson(
   req: IncomingMessage,
   res: ServerResponse,
-): Promise<void> {
+): Promise<{ value: unknown } | null> {
   const closeConn = { Connection: "close" };
 
   if (!isJsonContentType(req.headers["content-type"])) {
     sendJson(res, 415, { error: "Content-Type must be application/json" }, closeConn);
-    return;
+    return null;
   }
 
   const declared = Number(req.headers["content-length"]);
   if (declared > MAX_BODY_BYTES) {
     sendJson(res, 413, { error: "Payload Too Large" }, closeConn);
-    return;
+    return null;
   }
 
   const text = await readBody(req, MAX_BODY_BYTES);
   if (text === null) {
     sendJson(res, 413, { error: "Payload Too Large" }, closeConn);
-    return;
+    return null;
   }
 
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
+    return { value: JSON.parse(text) };
   } catch {
     sendJson(res, 400, { error: "Malformed JSON" });
-    return;
+    return null;
   }
+}
+
+async function createEvent(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const body = await readJson(req, res);
+  if (!body) return;
 
   // Validate fully before touching the store: invalid input never mutates.
-  const result = validateNewEvent(parsed);
+  const result = validateNewEvent(body.value);
   if (!result.ok) {
     sendJson(res, 422, { error: "Unprocessable Content", details: result.details });
     return;
@@ -143,6 +162,49 @@ async function createEvent(
   const event: EventItem = { id: nextId++, ...result.value };
   events.push(event);
   sendJson(res, 201, event, { Location: `/events/${event.id}` });
+}
+
+// PUT replaces the whole event (name and seats required). The id comes from the
+// URL; an `id` in the body is ignored. Existence is checked before the body.
+async function replaceEvent(
+  id: number,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  if (!events.some((e) => e.id === id)) {
+    sendJson(res, 404, { error: "Not Found" }, ignoredBodyHeaders(req));
+    return;
+  }
+
+  const body = await readJson(req, res);
+  if (!body) return;
+
+  const result = validateNewEvent(body.value);
+  if (!result.ok) {
+    sendJson(res, 422, { error: "Unprocessable Content", details: result.details });
+    return;
+  }
+
+  // Look the event up again: the store may have changed while the body was read.
+  const index = events.findIndex((e) => e.id === id);
+  if (index === -1) {
+    sendJson(res, 404, { error: "Not Found" });
+    return;
+  }
+  const event: EventItem = { id, ...result.value };
+  events[index] = event;
+  sendJson(res, 200, event);
+}
+
+function deleteEvent(id: number, req: IncomingMessage, res: ServerResponse): void {
+  const index = events.findIndex((e) => e.id === id);
+  if (index === -1) {
+    sendJson(res, 404, { error: "Not Found" }, ignoredBodyHeaders(req));
+    return;
+  }
+  events.splice(index, 1);
+  res.writeHead(204, ignoredBodyHeaders(req));
+  res.end();
 }
 
 async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -162,16 +224,20 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   // Strict canonical id: positive decimal, no leading zeros, no trailing slash.
   const eventMatch = /^\/events\/([1-9][0-9]*)$/.exec(pathname);
   if (eventMatch) {
-    if (req.method !== "GET") {
-      methodNotAllowed(res, "GET");
-      return;
-    }
     const id = Number(eventMatch[1]);
-    const event = events.find((e) => e.id === id);
-    if (event) {
-      sendJson(res, 200, event);
+    if (req.method === "GET") {
+      const event = events.find((e) => e.id === id);
+      if (event) {
+        sendJson(res, 200, event);
+      } else {
+        sendJson(res, 404, { error: "Not Found" });
+      }
+    } else if (req.method === "PUT") {
+      await replaceEvent(id, req, res);
+    } else if (req.method === "DELETE") {
+      deleteEvent(id, req, res);
     } else {
-      sendJson(res, 404, { error: "Not Found" });
+      methodNotAllowed(res, "GET, PUT, DELETE");
     }
     return;
   }

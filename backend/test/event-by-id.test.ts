@@ -41,9 +41,10 @@ test("GET /events/1 does not mutate the collection", async () => {
   assert.equal(JSON.stringify(events), snapshot);
 });
 
-test("DELETE /events/1 returns 405 with Allow and does not delete", async () => {
-  const res = await fetch(`${base}/events/1`, { method: "DELETE" });
+test("PATCH /events/1 returns 405 with Allow and does not change anything", async () => {
+  const snapshot = JSON.stringify(events);
+  const res = await fetch(`${base}/events/1`, { method: "PATCH" });
   assert.equal(res.status, 405);
-  assert.equal(res.headers.get("allow"), "GET");
-  assert.ok(events.some((e) => e.id === 1));
+  assert.equal(res.headers.get("allow"), "GET, PUT, DELETE");
+  assert.equal(JSON.stringify(events), snapshot);
 });

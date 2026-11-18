@@ -292,3 +292,11 @@ Owner decisions recorded in [ADR-002](../decisions/002-event-creation-rules.md).
 - Negative (none mutate the store, checked in tests): `Content-Type: text/plain` -> 415; body `{` -> 400 `{"error":"Malformed JSON"}`; `{"name":"  ","seats":-1}` -> 422 with two `details`; 20 KB body -> 413. Tests also cover non-object JSON, missing/wrong-typed fields, 101-char name, fractional/string/null/oversized seats, and a streamed body without `Content-Length` (413).
 - Not covered: concurrent POST races (Node runs handlers on one thread and the store update has no `await`, so it is atomic here; no stress test was run); no server timeouts configured for slow bodies.
 - Limitations: in-memory only; no idempotency key; owner confirmation pending.
+
+### Step 5 — `PUT` and `DELETE` on `/events/:id` (2026-11-18)
+Owner decisions recorded in [ADR-003](../decisions/003-put-delete-semantics.md). Code: `backend/src/server.ts` (JSON body reading is now shared by POST and PUT), tests: `backend/test/modify-event.test.ts`. `Allow` for `/events/:id` is now `GET, PUT, DELETE`. The earlier test that expected `DELETE /events/1` to return 405 was replaced by a `PATCH` 405 test because DELETE is now implemented.
+- `npm test`: 44 passed, 0 failed. `npm run typecheck`: exit 0.
+- Positive (`curl` on a running server): `PUT /events/1` with `{"id":5,"name":"Renamed Night","seats":99}` -> `200`, body `{"id":1,"name":"Renamed Night","seats":99}`; the identical request again -> the same response and state (idempotent). `DELETE /events/2` -> `204 No Content` with no `Content-Type` and no body; the list afterwards contained only event 1.
+- Negative: `PUT /events/999` with an invalid body -> `404` (existence checked first); `PUT /events/2` with `{"name":"A"}` -> `422`; repeated `DELETE /events/2` -> `404`; `GET /events/2` -> `404`; `PATCH /events/1` -> `405`, `Allow: GET, PUT, DELETE`. Tests additionally cover 415/400/413 on PUT, unchanged store after each failure, DELETE ignoring a request body, DELETE with non-canonical ids, and that a deleted id is not reused by a later POST.
+- Not covered: concurrent PUT/DELETE races (no stress test), `If-Match`/lost-update protection.
+- Limitations: in-memory only; owner confirmation pending.
