@@ -4,7 +4,7 @@
 - Playlist position: 6 ([course playlist](https://www.youtube.com/playlist?list=PLui3EUkuMTPgZcV0QhQrOcwMPcBCcd_Q1)).
 - Date: 2026-11-16
 - Learning status: complete (owner requested upload after discussion).
-- Implementation status: not started.
+- Implementation status: complete (owner confirmed 2026-11-18).
 - Source availability: lecture identity and topic were identified in the learning session from available materials and transcript excerpts; full transcript was unavailable. The explanations below synthesize the session, with framework behavior, trees, HTTP status semantics and assignment design as supplementary engineering material, not a verbatim or exhaustive account of the video. No runtime experiments or benchmarks were performed during this learning session.
 
 ## Learning objectives
@@ -192,9 +192,57 @@ Use the path syntax appropriate to the chosen language. Preserve previous unvers
 - [x] Conceptual notes, discussion and assignment documented.
 - [x] Learning status updated independently in docs/PROGRESS.md.
 
-## Implementation evidence (coding agent; pending)
-No implementation or tests were performed for this lecture. Preserve the learning content above.
-- [ ] Implementation or reproducible experiment.
-- [ ] Acceptance criteria demonstrated.
-- [ ] Negative cases and regression checks.
-- [ ] Implementation progress updated and learner confirmed.
+## Implementation evidence (coding agent; complete)
+Date: 2026-11-18. Environment: Linux, Node via `tsx`, native `node:http`, no new dependencies. Decisions: [ADR-005](../decisions/005-router-and-api-versioning.md). Code: `backend/src/router.ts`, route table and v1 handlers in `backend/src/server.ts`. Tests: `backend/test/router.test.ts` (pure router), `backend/test/routing-v1.test.ts` (HTTP).
+
+Commands run: `cd backend && npm run typecheck` (clean) and `npm test`: 101 tests, 101 pass, 0 fail (64 earlier tests unchanged and passing, 37 new). No benchmarks.
+
+### Steps 1-2 — dispatcher, route table, parameters
+Route records (method, segments, constraints, handler) replace the if-chain. `:id` is extracted per segment. GET and POST on the same path dispatch to different handlers (tests: "same path, different methods…", "GET and POST on the same v1 path…"). `Allow` is derived from the table; lecture 05 `Allow` strings are unchanged and their tests pass.
+
+### Step 3 — collision experiment (isolated, unit tests)
+- Unconstrained `/events/:id` registered first: `GET /events/search` returns handler `show` with `id = "search"` (the bug, reproduced).
+- Fix A, order: static route first, search and ids both correct.
+- Fix B, constraint `^[1-9][0-9]*$`: correct in either registration order; `/events/abc` becomes 404.
+The server uses both protections.
+
+### Step 4 — groups and versions
+`router.group("/api/v1")`. Observed with curl against a local server on port 8099:
+
+| Request | Observed |
+| --- | --- |
+| `GET /health` | 200 `{"status":"ok"}` |
+| `GET /api/v1/events/2` | 200 event 2 |
+| `GET /api/v1/events/42` | 404 (handler-level: event missing) |
+| `GET /api/v1/events/abc` | 404 (routing miss, constraint) |
+| `GET /api/v1/events/search?q=tech` | 200, only "Synthetic Tech Meetup" |
+| `GET /api/v1/events?sort=-seats&page=1` | 200, `data` + `meta` |
+| `GET /api/v1/events?page=0` | 400, `page must be a positive integer` |
+| `GET /api/v1/events/2/tickets` | 200, 3 synthetic tickets |
+| `DELETE /api/v1/events` | 405, `Allow: GET, HEAD, POST, OPTIONS` |
+| `POST /api/v1/bookings` | 501 stub |
+| `GET /api/v2/events` | 404 |
+| `GET /api/v1/events/%zz` | 400, server keeps running |
+
+### Negative and edge cases (automated)
+Trailing slash, empty id, extra segments, upper-case path, `//api/v1/events`, `%2F` in a segment: 404. Malformed `%`, `%zz`, truncated UTF-8 escape: 400. `%31` decodes to id 1 (200); double-encoded `%2534` is not decoded twice. Repeated `page`, `sort`, `city`, `q`: 400. Invalid PATCH (`seats: -1`, empty body) leaves the store unchanged. HEAD on v1 matches GET headers with an empty body. Wildcard: one or more segments, masks later routes if registered first (unit tests only).
+
+### Why the router needs no database, and routing miss vs lookup miss
+`match()` takes two strings and compares them with registered patterns; nothing about the event's existence is known there. `/api/v1/events/42` matches the route (`id = 42`), then the handler looks in the store and returns 404. `/api/v1/events/abc` never reaches a handler. Both are 404 here; they differ in where the decision is made.
+
+### Review fixes (2026-11-18, after a review of PR #2)
+- `PATCH` merged into a copy read before the body arrived, so a concurrent `PUT` could be overwritten. It now re-reads the event after the body; a test with a slow `PATCH` and a `PUT` in between fails without the fix and passes with it.
+- An exact `HEAD` route now beats the `GET` fallback in any registration order (test added).
+- A wildcard no longer matches `..` or an encoded `/` (test added).
+
+### Deliberate simplifications
+- Linear scan over routes, not measured; no trie. No middleware.
+- `city` is accepted but not applied; tickets are derived on the fly; booking is a 501 stub; mock search is a substring match.
+- `PATCH` is v1 only to keep the legacy `Allow` lists stable. Wildcard is not exposed by the server.
+- Legacy `/events` kept alongside `/api/v1` instead of redirecting.
+
+### Checklist
+- [x] Implementation or reproducible experiment.
+- [x] Acceptance criteria demonstrated (tests and curl above).
+- [x] Negative cases and regression checks.
+- [x] Learner confirmed; implementation progress marked complete (2026-11-18).
