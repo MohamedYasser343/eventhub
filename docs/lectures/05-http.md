@@ -284,3 +284,11 @@ Owner decisions: any non-canonical id or trailing slash returns 404 (no 400 spli
 - `npm test`: 19 passed, 0 failed (includes 200 for `/events/1`, 404 for `/events/999`, 404 for `abc`, `0`, `-1`, `01`, `1.0`, `1e0`, `1/`, `1%20`, no mutation, `DELETE /events/1` returns 405 with `Allow: GET` and does not delete). `npm run typecheck`: exit 0.
 - `curl` against a running server (port 8082): `/events/1` -> `200 application/json; charset=utf-8` with body `{"id":1,"name":"Synthetic Jazz Night","seats":120}`; `/events/999`, `/events/abc`, `/events/01` -> `404 application/json; charset=utf-8`.
 - Limitations: read-only; 404 body does not distinguish a malformed id from a missing event. Owner confirmation pending.
+
+### Step 4 — `POST /events` (2026-11-18)
+Owner decisions recorded in [ADR-002](../decisions/002-event-creation-rules.md). Code: `backend/src/server.ts`, tests: `backend/test/create-event.test.ts`. `Allow` for `/events` is now `GET, POST`.
+- `npm test`: 31 passed, 0 failed. `npm run typecheck`: exit 0.
+- Positive: valid POST -> `201`, `Location: /events/3`, body `{"id":3,"name":"Synthetic Concert","seats":50}`; the same POST repeated -> a new event with id 4 (non-idempotent); the list then contained both.
+- Negative (none mutate the store, checked in tests): `Content-Type: text/plain` -> 415; body `{` -> 400 `{"error":"Malformed JSON"}`; `{"name":"  ","seats":-1}` -> 422 with two `details`; 20 KB body -> 413. Tests also cover non-object JSON, missing/wrong-typed fields, 101-char name, fractional/string/null/oversized seats, and a streamed body without `Content-Length` (413).
+- Not covered: concurrent POST races (Node runs handlers on one thread and the store update has no `await`, so it is atomic here; no stress test was run); no server timeouts configured for slow bodies.
+- Limitations: in-memory only; no idempotency key; owner confirmation pending.

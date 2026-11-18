@@ -39,8 +39,8 @@ test("GET /events on an empty collection returns []", async () => {
   }
 });
 
-test("DELETE /events returns 405 with Allow (not implemented yet)", async () => {
+test("DELETE /events returns 405 with Allow", async () => {
   const res = await fetch(`${base}/events`, { method: "DELETE" });
   assert.equal(res.status, 405);
-  assert.equal(res.headers.get("allow"), "GET");
+  assert.equal(res.headers.get("allow"), "GET, POST");
 });
