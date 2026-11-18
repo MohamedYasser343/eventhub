@@ -254,7 +254,7 @@ Use a minimal event model (id, name, seats) and in-memory collection. Path/metho
 - [x] Concepts, discussion and assignment documented.
 - [x] Learning status updated independently in PROGRESS.md.
 
-## Implementation evidence (coding agent; in progress)
+## Implementation evidence (coding agent; complete)
 No code, tests, experiments or benchmarks were executed during documentation.
 
 ### Step 1 — server and `/health` (2026-11-18)
@@ -272,13 +272,13 @@ Decisions: [ADR-001](../decisions/001-backend-language-and-tooling.md). Code: `b
 Code: `backend/src/server.ts` (in-memory `events` array of synthetic data), tests: `backend/test/events.test.ts`.
 - `npm test`: 7 passed, 0 failed (3 health, 4 events: 200 JSON list, no mutation across repeated GETs, empty collection returns `[]`, `DELETE /events` returns 405 with `Allow: GET`).
 - `curl -si --http1.1 http://localhost:8081/events` (port 8081 used for the run): `HTTP/1.1 200 OK`, `Content-Type: application/json; charset=utf-8`, `Content-Length: 103`, body `[{"id":1,"name":"Synthetic Jazz Night","seats":120},{"id":2,"name":"Synthetic Tech Meetup","seats":80}]`. `curl -X DELETE /events`: `405` with `Allow: GET`.
-- Limitations: read-only; `Allow` will grow as POST/HEAD/OPTIONS are added. State resets on restart. Owner confirmation pending.
+- Limitations: read-only; `Allow` will grow as POST/HEAD/OPTIONS are added. State resets on restart.
 
 ### Step 3 — `GET /events/:id` (2026-11-18)
 Owner decisions: any non-canonical id or trailing slash returns 404 (no 400 split); ids must match `^[1-9][0-9]*$` so each event has one URL. Code: `backend/src/server.ts`, tests: `backend/test/event-by-id.test.ts`.
 - `npm test`: 19 passed, 0 failed (includes 200 for `/events/1`, 404 for `/events/999`, 404 for `abc`, `0`, `-1`, `01`, `1.0`, `1e0`, `1/`, `1%20`, no mutation, `DELETE /events/1` returns 405 with `Allow: GET` and does not delete). `npm run typecheck`: exit 0.
 - `curl` against a running server (port 8082): `/events/1` -> `200 application/json; charset=utf-8` with body `{"id":1,"name":"Synthetic Jazz Night","seats":120}`; `/events/999`, `/events/abc`, `/events/01` -> `404 application/json; charset=utf-8`.
-- Limitations: read-only; 404 body does not distinguish a malformed id from a missing event. Owner confirmation pending.
+- Limitations: read-only; 404 body does not distinguish a malformed id from a missing event.
 
 ### Step 4 — `POST /events` (2026-11-18)
 Owner decisions recorded in [ADR-002](../decisions/002-event-creation-rules.md). Code: `backend/src/server.ts`, tests: `backend/test/create-event.test.ts`. `Allow` for `/events` is now `GET, POST`.
@@ -286,7 +286,7 @@ Owner decisions recorded in [ADR-002](../decisions/002-event-creation-rules.md).
 - Positive: valid POST -> `201`, `Location: /events/3`, body `{"id":3,"name":"Synthetic Concert","seats":50}`; the same POST repeated -> a new event with id 4 (non-idempotent); the list then contained both.
 - Negative (none mutate the store, checked in tests): `Content-Type: text/plain` -> 415; body `{` -> 400 `{"error":"Malformed JSON"}`; `{"name":"  ","seats":-1}` -> 422 with two `details`; 20 KB body -> 413. Tests also cover non-object JSON, missing/wrong-typed fields, 101-char name, fractional/string/null/oversized seats, and a streamed body without `Content-Length` (413).
 - Not covered: concurrent POST races (Node runs handlers on one thread and the store update has no `await`, so it is atomic here; no stress test was run); Node's default timeouts apply to slow bodies (`requestTimeout` 300 s, `headersTimeout` 60 s, `keepAliveTimeout` 5 s, read from a Node 24 `http.Server`); none were tuned and the number of connections is not capped.
-- Limitations: in-memory only; no idempotency key; owner confirmation pending.
+- Limitations: in-memory only; no idempotency key.
 
 ### Step 5 — `PUT` and `DELETE` on `/events/:id` (2026-11-18)
 Owner decisions recorded in [ADR-003](../decisions/003-put-delete-semantics.md). Code: `backend/src/server.ts` (JSON body reading is now shared by POST and PUT), tests: `backend/test/modify-event.test.ts`. `Allow` for `/events/:id` is now `GET, PUT, DELETE`. The earlier test that expected `DELETE /events/1` to return 405 was replaced by a `PATCH` 405 test because DELETE is now implemented.
@@ -294,7 +294,7 @@ Owner decisions recorded in [ADR-003](../decisions/003-put-delete-semantics.md).
 - Positive (`curl` on a running server): `PUT /events/1` with `{"id":5,"name":"Renamed Night","seats":99}` -> `200`, body `{"id":1,"name":"Renamed Night","seats":99}`; the identical request again -> the same response and state (idempotent). `DELETE /events/2` -> `204 No Content` with no `Content-Type` and no body; the list afterwards contained only event 1.
 - Negative: `PUT /events/999` with an invalid body -> `404` (existence checked first); `PUT /events/2` with `{"name":"A"}` -> `422`; repeated `DELETE /events/2` -> `404`; `GET /events/2` -> `404`; `PATCH /events/1` -> `405`, `Allow: GET, PUT, DELETE`. Tests additionally cover 415/400/413 on PUT, unchanged store after each failure, DELETE ignoring a request body, DELETE with non-canonical ids, and that a deleted id is not reused by a later POST.
 - Not covered: concurrent PUT/DELETE races (no stress test), `If-Match`/lost-update protection.
-- Limitations: in-memory only; owner confirmation pending.
+- Limitations: in-memory only.
 
 ### Steps 6–9 — HEAD, OPTIONS, CORS, ETag, connection reuse (2026-11-18)
 Owner decisions and implementation choices: [ADR-004](../decisions/004-head-options-cors-etag.md). Code: `backend/src/server.ts`; tests: `backend/test/head-options-cors.test.ts`; browser page: `backend/experiments/cors-test/index.html`; how to run everything: `backend/README.md`. Allowed browser origin: `http://localhost:3000` only. Optional gzip (assignment step 7): **deferred** by owner decision, no measurements taken. The `Allow` values of earlier steps changed to `GET, HEAD, POST, OPTIONS` (collection), `GET, HEAD, PUT, DELETE, OPTIONS` (item) and `GET, HEAD` (health), and the existing tests were updated to match.
@@ -338,4 +338,4 @@ Owner decisions and implementation choices: [ADR-004](../decisions/004-head-opti
 - [x] Implementation or reproducible experiment (`backend/`, `backend/README.md`).
 - [x] Acceptance criteria demonstrated: 1–6 above; 7 (gzip) deferred as optional.
 - [x] Negative cases and regression checks (`npm test`, 60 tests, covers all earlier steps).
-- [ ] Implementation progress updated and owner confirmed (owner confirmation pending).
+- [x] Implementation progress updated and owner confirmed (owner confirmed in chat on 2026-11-18, after review; PR #1 marked ready).

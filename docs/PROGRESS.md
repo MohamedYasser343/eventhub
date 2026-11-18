@@ -5,9 +5,9 @@ Last updated: 2026-11-18.
 ## Current state
 - Repository initialization: documentation foundations prepared.
 - Learning: lectures 05–06 complete (owner confirmed 2026-11-16); reference notes for 01–04 prepared, completion not confirmed.
-- Implementation: lecture 05 awaiting learner review (all assignment endpoints, CORS, ETag and experiments demonstrated; optional gzip deferred; ADR-001 to ADR-004).
+- Implementation: lecture 05 complete (owner confirmed 2026-11-18; endpoints, CORS, ETag and experiments demonstrated; optional gzip deferred; ADR-001 to ADR-004).
 - Next learning milestone: playlist position 7 (provisional: Serialization; verify actual video title and scope).
-- Next implementation milestone: owner review and confirmation of lecture 05 (see [assignment](lectures/05-http.md)); then lecture 06 — Routing.
+- Next implementation milestone: lecture 06 — Routing; see [practical assignment](lectures/06-routing.md). Not started; needs owner approval.
 - Backend language: Node/TypeScript, native `node:http`, `tsx` dev runner ([ADR-001](decisions/001-backend-language-and-tooling.md)).
 - Frontend: deferred until backend curriculum completion and explicit owner approval.
 - Tests/benchmarks: `npm test` 64/64 passing and `npm run typecheck` clean; no benchmarks.
@@ -20,7 +20,7 @@ Track learning and implementation independently. Status values: not started, in 
 | 2 | Not confirmed | Not confirmed | [Learning approach](lectures/02-learning-approach.md) — reference | — |
 | 3 | Not confirmed | Not confirmed | [What is a backend?](lectures/03-what-is-a-backend.md) — reference | — |
 | 4 | Not confirmed | Not confirmed | [First principles benefits](lectures/04-first-principles-benefits.md) — reference | — |
-| 5 | Complete | Awaiting learner review | [Understanding HTTP](lectures/05-http.md), 2026-11-16; no open technical questions recorded; full transcript unverified. | [Evidence: steps 1-9](lectures/05-http.md#step-1--server-and-health-2026-11-18) |
+| 5 | Complete | Complete | [Understanding HTTP](lectures/05-http.md), 2026-11-16; no open technical questions recorded; full transcript unverified. | [Evidence: steps 1-9](lectures/05-http.md#step-1--server-and-health-2026-11-18) |
 | 6 | Complete | Not started | [Routing](lectures/06-routing.md), 2026-11-16; Express/Laravel matching discussion recorded; full transcript unavailable. | — |
 | 7 | Not started | Not started | — | — |
 | 8 | Not started | Not started | — | — |
