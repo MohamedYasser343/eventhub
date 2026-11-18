@@ -278,3 +278,9 @@ Code: `backend/src/server.ts` (in-memory `events` array of synthetic data), test
 - [ ] Acceptance criteria demonstrated.
 - [ ] Negative cases and regression checks.
 - [ ] Implementation progress updated and owner confirmed.
+
+### Step 3 — `GET /events/:id` (2026-11-18)
+Owner decisions: any non-canonical id or trailing slash returns 404 (no 400 split); ids must match `^[1-9][0-9]*$` so each event has one URL. Code: `backend/src/server.ts`, tests: `backend/test/event-by-id.test.ts`.
+- `npm test`: 19 passed, 0 failed (includes 200 for `/events/1`, 404 for `/events/999`, 404 for `abc`, `0`, `-1`, `01`, `1.0`, `1e0`, `1/`, `1%20`, no mutation, `DELETE /events/1` returns 405 with `Allow: GET` and does not delete). `npm run typecheck`: exit 0.
+- `curl` against a running server (port 8082): `/events/1` -> `200 application/json; charset=utf-8` with body `{"id":1,"name":"Synthetic Jazz Night","seats":120}`; `/events/999`, `/events/abc`, `/events/01` -> `404 application/json; charset=utf-8`.
+- Limitations: read-only; 404 body does not distinguish a malformed id from a missing event. Owner confirmation pending.

@@ -41,6 +41,23 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     return;
   }
 
+  // Strict canonical id: positive decimal, no leading zeros, no trailing slash.
+  const eventMatch = /^\/events\/([1-9][0-9]*)$/.exec(pathname);
+  if (eventMatch) {
+    if (req.method !== "GET") {
+      sendJson(res, 405, { error: "Method Not Allowed" }, { Allow: "GET" });
+      return;
+    }
+    const id = Number(eventMatch[1]);
+    const event = events.find((e) => e.id === id);
+    if (event) {
+      sendJson(res, 200, event);
+    } else {
+      sendJson(res, 404, { error: "Not Found" });
+    }
+    return;
+  }
+
   if (pathname === "/health") {
     if (req.method === "GET") {
       sendJson(res, 200, { status: "ok" });
