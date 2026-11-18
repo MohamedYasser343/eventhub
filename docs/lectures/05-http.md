@@ -254,9 +254,88 @@ Use a minimal event model (id, name, seats) and in-memory collection. Path/metho
 - [x] Concepts, discussion and assignment documented.
 - [x] Learning status updated independently in PROGRESS.md.
 
-## Implementation evidence (coding agent; pending)
+## Implementation evidence (coding agent; complete)
 No code, tests, experiments or benchmarks were executed during documentation.
-- [ ] Implementation or reproducible experiment.
-- [ ] Acceptance criteria demonstrated.
-- [ ] Negative cases and regression checks.
-- [ ] Implementation progress updated and owner confirmed.
+
+### Step 1 — server and `/health` (2026-11-18)
+Decisions: [ADR-001](../decisions/001-backend-language-and-tooling.md). Code: `backend/src/server.ts`, tests: `backend/test/health.test.ts`. Environment: Node v24.22.1, Linux.
+- `cd backend && npm test`: 3 tests passed, 0 failed (GET /health 200 JSON; POST /health 405 with `Allow: GET`; unknown path 404).
+- `PORT=8080 npm start`, then `curl -sv --http1.1 http://localhost:8080/health`: request line `GET /health HTTP/1.1`; response `HTTP/1.1 200 OK`, `Content-Type: application/json; charset=utf-8`, `Content-Length: 15`, `Connection: keep-alive`, `Keep-Alive: timeout=5`, body `{"status":"ok"}`.
+- `curl -i -X POST /health`: `405 Method Not Allowed` with `Allow: GET`. `curl -i /nope`: `404 Not Found`.
+- Limitations at that point: only `/health` existed; no type-check configured.
+
+### Tooling — type-check and install-script policy (2026-11-18)
+- Added `backend/tsconfig.json` (strict, `noEmit`) and `npm run typecheck` (`tsc --noEmit`): exit code 0.
+- npm warned that `esbuild@0.28.2` has an unapproved postinstall script. Denied it (`allowScripts: { esbuild: false }` in `backend/package.json`). After deleting `node_modules` and reinstalling there was no warning and tests still passed, so `tsx` does not need the script here.
+
+### Step 2 — `GET /events` (2026-11-18)
+Code: `backend/src/server.ts` (in-memory `events` array of synthetic data), tests: `backend/test/events.test.ts`.
+- `npm test`: 7 passed, 0 failed (3 health, 4 events: 200 JSON list, no mutation across repeated GETs, empty collection returns `[]`, `DELETE /events` returns 405 with `Allow: GET`).
+- `curl -si --http1.1 http://localhost:8081/events` (port 8081 used for the run): `HTTP/1.1 200 OK`, `Content-Type: application/json; charset=utf-8`, `Content-Length: 103`, body `[{"id":1,"name":"Synthetic Jazz Night","seats":120},{"id":2,"name":"Synthetic Tech Meetup","seats":80}]`. `curl -X DELETE /events`: `405` with `Allow: GET`.
+- Limitations: read-only; `Allow` will grow as POST/HEAD/OPTIONS are added. State resets on restart.
+
+### Step 3 — `GET /events/:id` (2026-11-18)
+Owner decisions: any non-canonical id or trailing slash returns 404 (no 400 split); ids must match `^[1-9][0-9]*$` so each event has one URL. Code: `backend/src/server.ts`, tests: `backend/test/event-by-id.test.ts`.
+- `npm test`: 19 passed, 0 failed (includes 200 for `/events/1`, 404 for `/events/999`, 404 for `abc`, `0`, `-1`, `01`, `1.0`, `1e0`, `1/`, `1%20`, no mutation, `DELETE /events/1` returns 405 with `Allow: GET` and does not delete). `npm run typecheck`: exit 0.
+- `curl` against a running server (port 8082): `/events/1` -> `200 application/json; charset=utf-8` with body `{"id":1,"name":"Synthetic Jazz Night","seats":120}`; `/events/999`, `/events/abc`, `/events/01` -> `404 application/json; charset=utf-8`.
+- Limitations: read-only; 404 body does not distinguish a malformed id from a missing event.
+
+### Step 4 — `POST /events` (2026-11-18)
+Owner decisions recorded in [ADR-002](../decisions/002-event-creation-rules.md). Code: `backend/src/server.ts`, tests: `backend/test/create-event.test.ts`. `Allow` for `/events` is now `GET, POST`.
+- `npm test`: 31 passed, 0 failed. `npm run typecheck`: exit 0.
+- Positive: valid POST -> `201`, `Location: /events/3`, body `{"id":3,"name":"Synthetic Concert","seats":50}`; the same POST repeated -> a new event with id 4 (non-idempotent); the list then contained both.
+- Negative (none mutate the store, checked in tests): `Content-Type: text/plain` -> 415; body `{` -> 400 `{"error":"Malformed JSON"}`; `{"name":"  ","seats":-1}` -> 422 with two `details`; 20 KB body -> 413. Tests also cover non-object JSON, missing/wrong-typed fields, 101-char name, fractional/string/null/oversized seats, and a streamed body without `Content-Length` (413).
+- Not covered: concurrent POST races (Node runs handlers on one thread and the store update has no `await`, so it is atomic here; no stress test was run); Node's default timeouts apply to slow bodies (`requestTimeout` 300 s, `headersTimeout` 60 s, `keepAliveTimeout` 5 s, read from a Node 24 `http.Server`); none were tuned and the number of connections is not capped.
+- Limitations: in-memory only; no idempotency key.
+
+### Step 5 — `PUT` and `DELETE` on `/events/:id` (2026-11-18)
+Owner decisions recorded in [ADR-003](../decisions/003-put-delete-semantics.md). Code: `backend/src/server.ts` (JSON body reading is now shared by POST and PUT), tests: `backend/test/modify-event.test.ts`. `Allow` for `/events/:id` is now `GET, PUT, DELETE`. The earlier test that expected `DELETE /events/1` to return 405 was replaced by a `PATCH` 405 test because DELETE is now implemented.
+- `npm test`: 44 passed, 0 failed. `npm run typecheck`: exit 0.
+- Positive (`curl` on a running server): `PUT /events/1` with `{"id":5,"name":"Renamed Night","seats":99}` -> `200`, body `{"id":1,"name":"Renamed Night","seats":99}`; the identical request again -> the same response and state (idempotent). `DELETE /events/2` -> `204 No Content` with no `Content-Type` and no body; the list afterwards contained only event 1.
+- Negative: `PUT /events/999` with an invalid body -> `404` (existence checked first); `PUT /events/2` with `{"name":"A"}` -> `422`; repeated `DELETE /events/2` -> `404`; `GET /events/2` -> `404`; `PATCH /events/1` -> `405`, `Allow: GET, PUT, DELETE`. Tests additionally cover 415/400/413 on PUT, unchanged store after each failure, DELETE ignoring a request body, DELETE with non-canonical ids, and that a deleted id is not reused by a later POST.
+- Not covered: concurrent PUT/DELETE races (no stress test), `If-Match`/lost-update protection.
+- Limitations: in-memory only.
+
+### Steps 6–9 — HEAD, OPTIONS, CORS, ETag, connection reuse (2026-11-18)
+Owner decisions and implementation choices: [ADR-004](../decisions/004-head-options-cors-etag.md). Code: `backend/src/server.ts`; tests: `backend/test/head-options-cors.test.ts`; browser page: `backend/experiments/cors-test/index.html`; how to run everything: `backend/README.md`. Allowed browser origin: `http://localhost:3000` only. Optional gzip (assignment step 7): **deferred** by owner decision, no measurements taken. The `Allow` values of earlier steps changed to `GET, HEAD, POST, OPTIONS` (collection), `GET, HEAD, PUT, DELETE, OPTIONS` (item) and `GET, HEAD` (health), and the existing tests were updated to match.
+
+**Automated:** `npm test`: 60 passed, 0 failed; `npm run typecheck`: exit 0.
+
+**HEAD / OPTIONS / 405 / 404 (`curl`, server on 8080):**
+- `curl -sv --http1.1 /events`: request line `GET /events HTTP/1.1`; `200 OK`, `Content-Type: application/json; charset=utf-8`, `Content-Length: 149`, `Vary: Origin`, `Connection: keep-alive`, `Keep-Alive: timeout=5`.
+- `curl -I /events`: same status and headers including `Content-Length: 149`, no body. `curl -i -X OPTIONS /events`: `204 No Content`, `Allow: GET, HEAD, POST, OPTIONS`, no body.
+- `PATCH /events` -> 405 (known resource); `PATCH /nope` -> 404 (unknown resource).
+
+**CORS, `curl` preflight:** with `Origin: http://localhost:3000`, `Access-Control-Request-Method: POST` -> `204` with `Access-Control-Allow-Origin: http://localhost:3000`, `Access-Control-Allow-Methods: GET, HEAD, POST, OPTIONS`, `Access-Control-Allow-Headers: Content-Type, If-None-Match`, `Access-Control-Max-Age: 600`, `Vary: Origin, Access-Control-Request-Method, Access-Control-Request-Headers`. With `Origin: http://127.0.0.1:3000` -> `204`, `Allow` only, no `Access-Control-*`.
+
+**CORS, real browser** (Claude desktop in-app browser; page served by `python3 -m http.server 3000`; API on 8080 with `LOG_REQUESTS=1`). This is browser behavior; `curl` alone cannot show it.
+- *Allowed origin `http://localhost:3000`:* simple `GET /events` -> readable (200). JSON `POST /events` -> preflight then `201`, and the page could read `Location: /events/3` (exposed header). `GET /events/1` -> readable `ETag`.
+- *Rejected origin `http://127.0.0.1:3000`* (same page, same API), three different outcomes:
+  1. `GET /events` (simple): the request **reached the server** (log: `GET /events origin=http://127.0.0.1:3000 -> 200`) but the browser **blocked access to the response**: console `No 'Access-Control-Allow-Origin' header is present on the requested resource`; page saw `TypeError: Failed to fetch`.
+  2. `POST /events` (JSON): the **preflight was blocked**: log `OPTIONS /events ... -> 204` and **no POST line**; console `Response to preflight request doesn't pass access control check`. The event count stayed 3 before and after, so nothing was created.
+  3. `GET /events/1`: reached the server (log `-> 304`, the browser had cached the validator) and was blocked with `The 'Access-Control-Allow-Origin' header has a value 'http://localhost:3000' that is not equal to the supplied origin`. I did not investigate how the browser cache produced that header, so I do not claim a cause.
+- *A bug found by this experiment:* the first run from the allowed origin blocked the conditional GET (`If-None-Match`): the log showed `OPTIONS /events/1` and no GET, because `If-None-Match` is not CORS-safelisted and the preflight only approved `Content-Type`. Fixed by also allowing `If-None-Match`; the rerun succeeded (`304`, readable `ETag`).
+- *Preflight caching:* in the second run from the allowed origin there was no `OPTIONS /events` before the POST, consistent with `Access-Control-Max-Age: 600` (inferred from the missing log line, not from DevTools timing).
+
+**ETag (`curl`):** `GET /events/1` -> `ETag: "9c4a08da7bb6e98177a2f66493a31e74"`. `If-None-Match` with that value -> `304`, 0 bytes. After `PUT /events/1` the ETag became `"eb9a7b598b6e5676dd874ce58b3d2ced"`; `If-None-Match` with the old value -> `200`; with the new value -> `304`. Tests also cover list/weak/`*` forms, HEAD carrying the ETag, and no ETag or 304 for a missing event.
+
+**Connection reuse (`curl -sv --http1.1`, no performance claim):**
+- One invocation with three URLs: one `Established connection` (an initial `::1` attempt was refused because the server binds `127.0.0.1` only), then `Reusing existing http: connection` twice, `Connection #0 ... left intact` three times -> **reused**.
+- Three separate invocations: each printed its own `Established connection` and `Connection #0 left intact` -> **no reuse** (each process ends and drops its connection).
+- One invocation with `-H 'Connection: close'`: three connections (`#0`, `#1`, `#2`), each with `shutting down connection` and response `Connection: close` -> **no reuse**.
+- Automated equivalent: tests count server `connection` events: 3 sequential requests on a keep-alive agent -> 1 connection; with `Connection: close` -> 3.
+
+**Not covered / limitations:** no gzip (deferred); no stress test for concurrent writes; no `If-Match`; the browser run used one browser (Chromium-based in-app) and I did not test other browsers; not production-ready (in-memory, no auth).
+
+### Review fixes (2026-11-18, after a review of PR #1)
+- **Fixed:** request targets starting with `//` were parsed as `//host/path`, so `GET //x/events` and `GET //evil.example/events/1` returned 200 (found by probing with `curl --path-as-is`). Origin-form targets are now parsed against a fixed host and return 404; absolute-form targets are still accepted (RFC 9112). A test for `//` fails on the old parsing (checked in a scratch copy).
+- **Added tests:** a PUT whose event is deleted while its body is still arriving returns 404 (fails if the second lookup in `replaceEvent` is removed; 10/10 reruns passed); a preflight for `PUT` and `DELETE` on `/events/1`.
+- **Corrected:** the step 4 note about timeouts (see above).
+- **Refactor:** the server start/stop setup shared by all test files is now `backend/test/helpers.ts`; the refactor alone took the test code from 666 to 642 lines (24 fewer, helper included); after the new tests the total is 710 lines.
+- `npm test`: 64 passed, 0 failed. `npm run typecheck`: exit 0.
+
+## Implementation checklist (coding agent)
+- [x] Implementation or reproducible experiment (`backend/`, `backend/README.md`).
+- [x] Acceptance criteria demonstrated: 1–6 above; 7 (gzip) deferred as optional.
+- [x] Negative cases and regression checks (`npm test`, 60 tests, covers all earlier steps).
+- [x] Implementation progress updated and owner confirmed (owner confirmed in chat on 2026-11-18, after review; PR #1 marked ready).
