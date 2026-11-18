@@ -24,7 +24,7 @@ test("GET /health returns 200 JSON", async () => {
 test("POST /health returns 405 with Allow", async () => {
   const res = await fetch(`${base}/health`, { method: "POST" });
   assert.equal(res.status, 405);
-  assert.equal(res.headers.get("allow"), "GET");
+  assert.equal(res.headers.get("allow"), "GET, HEAD");
 });
 
 test("unknown path returns 404", async () => {

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { fileURLToPath } from "node:url";
@@ -21,6 +22,15 @@ const MAX_BODY_BYTES = 16 * 1024;
 const MAX_NAME_LENGTH = 100;
 const MAX_SEATS = 100_000;
 
+// Exactly one browser origin may read responses (CORS). Anything else gets no
+// CORS headers, so the browser, not the server, blocks it.
+const ALLOWED_ORIGIN = process.env.CORS_ORIGIN ?? "http://localhost:3000";
+
+// Allow lists per resource (also the source of truth for preflight answers).
+const ALLOW_COLLECTION = "GET, HEAD, POST, OPTIONS";
+const ALLOW_ITEM = "GET, HEAD, PUT, DELETE, OPTIONS";
+const ALLOW_HEALTH = "GET, HEAD";
+
 function sendJson(
   res: ServerResponse,
   status: number,
@@ -38,6 +48,72 @@ function sendJson(
 
 function methodNotAllowed(res: ServerResponse, allow: string): void {
   sendJson(res, 405, { error: "Method Not Allowed" }, { Allow: allow });
+}
+
+// Added to every response. The response depends on the Origin request header,
+// so caches must be told (Vary). Only the one allowed origin gets ACAO, and
+// only then may browser code read Location and ETag.
+function applyCors(req: IncomingMessage, res: ServerResponse): void {
+  res.setHeader("Vary", "Origin");
+  if (req.headers.origin === ALLOWED_ORIGIN) {
+    res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
+    res.setHeader("Access-Control-Expose-Headers", "Location, ETag");
+  }
+}
+
+// OPTIONS: 204 with Allow. A CORS preflight (Origin + Access-Control-Request-
+// Method) from the allowed origin additionally gets the Access-Control-Allow-*
+// headers, but only for a method this resource really supports. A disallowed
+// origin still gets 204 + Allow and no ACAO, which the browser treats as denied.
+function handleOptions(req: IncomingMessage, res: ServerResponse, allow: string): void {
+  const headers: Record<string, string> = { Allow: allow };
+  const requested = req.headers["access-control-request-method"];
+  if (req.headers.origin !== undefined && requested !== undefined) {
+    res.setHeader(
+      "Vary",
+      "Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+    );
+    const supported = allow.split(",").map((m) => m.trim());
+    if (
+      req.headers.origin === ALLOWED_ORIGIN &&
+      typeof requested === "string" &&
+      supported.includes(requested)
+    ) {
+      headers["Access-Control-Allow-Methods"] = allow;
+      // If-None-Match is not CORS-safelisted, so a conditional GET from the
+      // browser is preflighted and must be approved explicitly.
+      headers["Access-Control-Allow-Headers"] = "Content-Type, If-None-Match";
+      headers["Access-Control-Max-Age"] = "600";
+    }
+  }
+  res.writeHead(204, headers);
+  res.end();
+}
+
+// Strong validator: changes whenever the representation's bytes change.
+function etagOf(payload: string): string {
+  return `"${createHash("sha256").update(payload).digest("hex").slice(0, 32)}"`;
+}
+
+// If-None-Match: "*" or a comma-separated list; weak comparison, so W/ is ignored.
+function etagMatches(header: string | undefined, etag: string): boolean {
+  if (header === undefined) return false;
+  if (header.trim() === "*") return true;
+  return header
+    .split(",")
+    .map((tag) => tag.trim().replace(/^W\//, ""))
+    .includes(etag);
+}
+
+function sendEvent(req: IncomingMessage, res: ServerResponse, event: EventItem): void {
+  const etag = etagOf(JSON.stringify(event));
+  const headers = { ETag: etag, "Cache-Control": "no-cache" };
+  if (etagMatches(req.headers["if-none-match"], etag)) {
+    res.writeHead(304, headers);
+    res.end();
+    return;
+  }
+  sendJson(res, 200, event, headers);
 }
 
 // Resolves with the body text, or null if it exceeds `limit` bytes.
@@ -209,14 +285,20 @@ function deleteEvent(id: number, req: IncomingMessage, res: ServerResponse): voi
 
 async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const { pathname } = new URL(req.url ?? "/", "http://localhost");
+  applyCors(req, res);
+
+  // HEAD is GET without a body: same status and headers (Node drops the body).
+  const readOnly = req.method === "GET" || req.method === "HEAD";
 
   if (pathname === "/events") {
-    if (req.method === "GET") {
+    if (readOnly) {
       sendJson(res, 200, events);
     } else if (req.method === "POST") {
       await createEvent(req, res);
+    } else if (req.method === "OPTIONS") {
+      handleOptions(req, res, ALLOW_COLLECTION);
     } else {
-      methodNotAllowed(res, "GET, POST");
+      methodNotAllowed(res, ALLOW_COLLECTION);
     }
     return;
   }
@@ -225,10 +307,10 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   const eventMatch = /^\/events\/([1-9][0-9]*)$/.exec(pathname);
   if (eventMatch) {
     const id = Number(eventMatch[1]);
-    if (req.method === "GET") {
+    if (readOnly) {
       const event = events.find((e) => e.id === id);
       if (event) {
-        sendJson(res, 200, event);
+        sendEvent(req, res, event);
       } else {
         sendJson(res, 404, { error: "Not Found" });
       }
@@ -236,17 +318,19 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       await replaceEvent(id, req, res);
     } else if (req.method === "DELETE") {
       deleteEvent(id, req, res);
+    } else if (req.method === "OPTIONS") {
+      handleOptions(req, res, ALLOW_ITEM);
     } else {
-      methodNotAllowed(res, "GET, PUT, DELETE");
+      methodNotAllowed(res, ALLOW_ITEM);
     }
     return;
   }
 
   if (pathname === "/health") {
-    if (req.method === "GET") {
+    if (readOnly) {
       sendJson(res, 200, { status: "ok" });
     } else {
-      methodNotAllowed(res, "GET");
+      methodNotAllowed(res, ALLOW_HEALTH);
     }
     return;
   }
@@ -255,6 +339,13 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 }
 
 export const server = createServer((req, res) => {
+  if (process.env.LOG_REQUESTS === "1") {
+    res.on("finish", () => {
+      console.log(
+        `${req.method} ${req.url} origin=${req.headers.origin ?? "-"} -> ${res.statusCode}`,
+      );
+    });
+  }
   handle(req, res).catch(() => {
     if (!res.headersSent) {
       sendJson(res, 500, { error: "Internal Server Error" });

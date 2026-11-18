@@ -147,5 +147,5 @@ test("body over 16 KB returns 413 when streamed without Content-Length", async (
 test("PUT /events still returns 405 with Allow: GET, POST", async () => {
   const res = await fetch(`${base}/events`, { method: "PUT" });
   assert.equal(res.status, 405);
-  assert.equal(res.headers.get("allow"), "GET, POST");
+  assert.equal(res.headers.get("allow"), "GET, HEAD, POST, OPTIONS");
 });

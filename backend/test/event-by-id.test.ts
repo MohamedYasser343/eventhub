@@ -45,6 +45,6 @@ test("PATCH /events/1 returns 405 with Allow and does not change anything", asyn
   const snapshot = JSON.stringify(events);
   const res = await fetch(`${base}/events/1`, { method: "PATCH" });
   assert.equal(res.status, 405);
-  assert.equal(res.headers.get("allow"), "GET, PUT, DELETE");
+  assert.equal(res.headers.get("allow"), "GET, HEAD, PUT, DELETE, OPTIONS");
   assert.equal(JSON.stringify(events), snapshot);
 });
