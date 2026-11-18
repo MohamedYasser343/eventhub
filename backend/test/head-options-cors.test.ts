@@ -79,6 +79,18 @@ test("preflight from the allowed origin gets the Allow-* headers", async () => {
   assert.match(res.headers.get("vary") ?? "", /Origin/);
 });
 
+test("preflight approves PUT and DELETE on an item for the allowed origin", async () => {
+  for (const method of ["PUT", "DELETE"]) {
+    const res = await fetch(`${api.base}/events/1`, {
+      method: "OPTIONS",
+      headers: { Origin: ORIGIN, "Access-Control-Request-Method": method },
+    });
+    assert.equal(res.status, 204, method);
+    assert.equal(res.headers.get("access-control-allow-origin"), ORIGIN, method);
+    assert.match(res.headers.get("access-control-allow-methods") ?? "", new RegExp("\\b" + method + "\\b"), method);
+  }
+});
+
 test("preflight for a method the resource does not support is not approved", async () => {
   const res = await fetch(`${api.base}/events`, {
     method: "OPTIONS",

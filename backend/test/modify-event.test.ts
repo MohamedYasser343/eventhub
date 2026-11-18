@@ -1,6 +1,7 @@
 import { before, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { events } from "../src/server.ts";
+import http from "node:http";
+import { events, server } from "../src/server.ts";
 import type { EventItem } from "../src/server.ts";
 import { useServer } from "./helpers.ts";
 
@@ -81,6 +82,38 @@ test("PUT with malformed JSON, wrong Content-Type or huge body is rejected witho
   assert.equal((await put("/events/1", JSON.stringify({ name: "A", seats: 1 }), "text/plain")).status, 415);
   assert.equal((await put("/events/1", JSON.stringify({ name: "A", seats: 1, pad: "x".repeat(20000) }))).status, 413);
   assert.equal(snapshot(), JSON.stringify(seed));
+});
+
+// The handler checks the event exists, waits for the body, then looks it up
+// again. This deletes the event in between and expects 404, not a ghost update.
+test("PUT returns 404 if the event is deleted while its body is still arriving", async () => {
+  const { port } = new URL(api.base);
+  const body = JSON.stringify({ name: "Raced", seats: 5 });
+  const status = await new Promise<number>((resolve, reject) => {
+    const req = http.request(
+      {
+        host: "127.0.0.1",
+        port: Number(port),
+        method: "PUT",
+        path: "/events/1",
+        headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) },
+      },
+      (res) => {
+        res.resume();
+        res.on("end", () => resolve(res.statusCode ?? 0));
+      },
+    );
+    req.on("error", reject);
+    // Registered after the server's own handler, so when this runs the PUT
+    // handler has already passed its existence check and is waiting for the body.
+    server.once("request", () => {
+      void fetch(`${api.base}/events/1`, { method: "DELETE" }).then(() => req.end(body.slice(10)));
+    });
+    req.write(body.slice(0, 10));
+  });
+  assert.equal(status, 404);
+  assert.ok(!events.some((e) => e.id === 1));
+  assert.equal(events.length, seed.length - 1);
 });
 
 // ---------- DELETE ----------
