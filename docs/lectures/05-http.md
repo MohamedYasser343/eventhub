@@ -262,7 +262,17 @@ Decisions: [ADR-001](../decisions/001-backend-language-and-tooling.md). Code: `b
 - `cd backend && npm test`: 3 tests passed, 0 failed (GET /health 200 JSON; POST /health 405 with `Allow: GET`; unknown path 404).
 - `PORT=8080 npm start`, then `curl -sv --http1.1 http://localhost:8080/health`: request line `GET /health HTTP/1.1`; response `HTTP/1.1 200 OK`, `Content-Type: application/json; charset=utf-8`, `Content-Length: 15`, `Connection: keep-alive`, `Keep-Alive: timeout=5`, body `{"status":"ok"}`.
 - `curl -i -X POST /health`: `405 Method Not Allowed` with `Allow: GET`. `curl -i /nope`: `404 Not Found`.
-- Limitations: only `/health` exists; no events, validation, CORS, ETag or HEAD/OPTIONS yet. No type-check configured. Owner confirmation pending.
+- Limitations at that point: only `/health` existed; no type-check configured.
+
+### Tooling — type-check and install-script policy (2026-11-18)
+- Added `backend/tsconfig.json` (strict, `noEmit`) and `npm run typecheck` (`tsc --noEmit`): exit code 0.
+- npm warned that `esbuild@0.28.2` has an unapproved postinstall script. Denied it (`allowScripts: { esbuild: false }` in `backend/package.json`). After deleting `node_modules` and reinstalling there was no warning and tests still passed, so `tsx` does not need the script here.
+
+### Step 2 — `GET /events` (2026-11-18)
+Code: `backend/src/server.ts` (in-memory `events` array of synthetic data), tests: `backend/test/events.test.ts`.
+- `npm test`: 7 passed, 0 failed (3 health, 4 events: 200 JSON list, no mutation across repeated GETs, empty collection returns `[]`, `DELETE /events` returns 405 with `Allow: GET`).
+- `curl -si --http1.1 http://localhost:8081/events` (port 8081 used for the run): `HTTP/1.1 200 OK`, `Content-Type: application/json; charset=utf-8`, `Content-Length: 103`, body `[{"id":1,"name":"Synthetic Jazz Night","seats":120},{"id":2,"name":"Synthetic Tech Meetup","seats":80}]`. `curl -X DELETE /events`: `405` with `Allow: GET`.
+- Limitations: read-only; `Allow` will grow as POST/HEAD/OPTIONS are added. State resets on restart. Owner confirmation pending.
 
 - [ ] Implementation or reproducible experiment.
 - [ ] Acceptance criteria demonstrated.

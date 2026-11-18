@@ -17,8 +17,29 @@ function sendJson(
   res.end(payload);
 }
 
+export interface EventItem {
+  id: number;
+  name: string;
+  seats: number;
+}
+
+// In-memory store with synthetic data. State resets on restart.
+export const events: EventItem[] = [
+  { id: 1, name: "Synthetic Jazz Night", seats: 120 },
+  { id: 2, name: "Synthetic Tech Meetup", seats: 80 },
+];
+
 function handle(req: IncomingMessage, res: ServerResponse): void {
   const { pathname } = new URL(req.url ?? "/", "http://localhost");
+
+  if (pathname === "/events") {
+    if (req.method === "GET") {
+      sendJson(res, 200, events);
+    } else {
+      sendJson(res, 405, { error: "Method Not Allowed" }, { Allow: "GET" });
+    }
+    return;
+  }
 
   if (pathname === "/health") {
     if (req.method === "GET") {
