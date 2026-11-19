@@ -15,5 +15,8 @@
   },
   "allowScripts": {
     "esbuild": false
+  },
+  "dependencies": {
+    "jose": "^6.2.18"
   }
 }

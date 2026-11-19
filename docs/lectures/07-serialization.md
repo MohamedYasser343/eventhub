@@ -209,7 +209,7 @@ Owner approval to begin implementation; inspect latest code at that time; decide
 - [x] Conceptual notes, discussion and assignment documented.
 - [x] Learning status updated independently in docs/PROGRESS.md.
 
-## Implementation evidence (coding agent; awaiting learner review)
+## Implementation evidence (coding agent; complete)
 
 Date: 2026-11-19. Environment: Linux, Node v24, `tsx`, native `node:http`, no new dependencies. Decision: [ADR-006](../decisions/006-json-boundary-policy.md). Code: `backend/src/json.ts` (extracted helpers), `backend/src/server.ts`. Tests: `backend/test/serialization.test.ts` (13 new). Experiment: `backend/experiments/json-lossiness.ts`.
 

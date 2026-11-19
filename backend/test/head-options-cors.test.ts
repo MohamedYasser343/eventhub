@@ -74,7 +74,7 @@ test("preflight from the allowed origin gets the Allow-* headers", async () => {
   assert.equal(res.status, 204);
   assert.equal(res.headers.get("access-control-allow-origin"), ORIGIN);
   assert.equal(res.headers.get("access-control-allow-methods"), "GET, HEAD, POST, OPTIONS");
-  assert.equal(res.headers.get("access-control-allow-headers"), "Content-Type, If-None-Match");
+  assert.equal(res.headers.get("access-control-allow-headers"), "Content-Type, If-None-Match, Authorization");
   assert.equal(res.headers.get("access-control-max-age"), "600");
   assert.match(res.headers.get("vary") ?? "", /Origin/);
 });

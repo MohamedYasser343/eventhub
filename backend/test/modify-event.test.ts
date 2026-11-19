@@ -96,7 +96,7 @@ test("PUT returns 404 if the event is deleted while its body is still arriving",
         port: Number(port),
         method: "PUT",
         path: "/events/1",
-        headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) },
+        headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body), Authorization: `Bearer ${api.adminToken}` },
       },
       (res) => {
         res.resume();
