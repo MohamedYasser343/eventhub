@@ -1,6 +1,6 @@
 # ADR-007: Sessions with Bearer tokens, scrypt, role policy
 
-Status: Proposed (owner must confirm the adopted method after the JWT comparison)
+Status: Accepted (owner confirmed sessions, 2026-11-19; JWT lab kept as an isolated comparison)
 Date: 2026-11-19
 Related lecture: [08 — Authentication and authorization](../lectures/08-authentication-authorization.md)
 

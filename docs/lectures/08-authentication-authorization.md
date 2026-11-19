@@ -285,5 +285,5 @@ Comparison: sessions give immediate revocation and current roles at the cost of 
 Commands: `npm run typecheck` clean; `npm test`: 138 tests, 138 pass.
 
 ### Not done
-- Preferred authentication method is not confirmed by the owner (sessions implemented as the proposal).
+- Authentication method confirmed by the owner: sessions (ADR-007 accepted).
 - Implementation completion needs owner confirmation; lecture 07 review is a prerequisite per the note.
