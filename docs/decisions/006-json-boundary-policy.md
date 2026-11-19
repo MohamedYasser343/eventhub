@@ -1,6 +1,6 @@
 # ADR-006: JSON request boundary policy
 
-Status: Accepted (implementation awaiting owner review)
+Status: Accepted
 Date: 2026-11-19
 Related lecture: [07 — Serialization](../lectures/07-serialization.md)
 

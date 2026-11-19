@@ -246,7 +246,7 @@ Defer real database schema/migrations, Redis deployment, complete OAuth/OIDC pro
 - [x] Conceptual notes, discussion and assignment documented.
 - [x] Learning status updated independently in docs/PROGRESS.md in the same commit.
 
-## Implementation evidence (coding agent; partial, awaiting learner review)
+## Implementation evidence (coding agent; complete)
 
 Date: 2026-11-19. Environment: Linux, Node v24, `tsx`, native `node:http`, no new dependencies. Decision: [ADR-007](../decisions/007-authentication-and-authorization.md) (proposed). Code: `backend/src/auth.ts`, auth handlers and policy in `backend/src/server.ts`. Tests: `backend/test/auth.test.ts` (17 new), test helper `backend/test/helpers.ts`.
 
