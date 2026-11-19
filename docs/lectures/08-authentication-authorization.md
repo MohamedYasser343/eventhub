@@ -250,7 +250,7 @@ Defer real database schema/migrations, Redis deployment, complete OAuth/OIDC pro
 
 Date: 2026-11-19. Environment: Linux, Node v24, `tsx`, native `node:http`, no new dependencies. Decision: [ADR-007](../decisions/007-authentication-and-authorization.md) (proposed). Code: `backend/src/auth.ts`, auth handlers and policy in `backend/src/server.ts`. Tests: `backend/test/auth.test.ts` (17 new), test helper `backend/test/helpers.ts`.
 
-Commands: `cd backend && npm run typecheck` (clean); `npm test`: 131 tests, 131 pass, 0 fail (114 earlier tests still pass; four earlier tests needed edits, see below). No benchmarks.
+Commands (before the JWT lab): `cd backend && npm run typecheck` (clean); `npm test`: 131 tests, 131 pass, 0 fail (114 earlier tests still pass; four earlier tests needed edits, see below). No benchmarks.
 
 ### Done (automated)
 | Criterion | Evidence |
@@ -268,7 +268,22 @@ Commands: `cd backend && npm run typecheck` (clean); `npm test`: 131 tests, 131 
 ### Changes to earlier tests
 Event/routing tests authenticate as a synthetic admin through `useServer()` (it adds a Bearer header to `fetch`); two raw `http.request` calls got the header explicitly; the CORS preflight test now expects `Access-Control-Allow-Headers: Content-Type, If-None-Match, Authorization`. Unauthenticated writes to the legacy routes now give 401 (see ADR-007).
 
+### JWT experiment (lab only, not wired into the server)
+Added dependency `jose` (^6.2.18, approved by the owner). Code: `backend/experiments/jwt-lab.ts`; tests: `backend/test/jwt-lab.test.ts` (7). HS256, per-process random secret, issuer/audience/algorithm pinned, controlled clock for expiry.
+
+| Experiment | Result |
+| --- | --- |
+| Decode claims without a secret | `role`, `sub`, `iss`, `aud` readable: signed, not encrypted |
+| Role changed to admin without re-signing | rejected (signature) |
+| `alg: none`, HS512 token, other key, wrong issuer, wrong audience | all rejected |
+| Expiry | valid at +299 s, rejected at +301 s |
+| Stale role | claims-only (unsafe, lab only) still allows a demoted organizer; current-role lookup denies |
+| Client-only logout | discarding the token client-side does not revoke it; it verifies until `exp`; 30 s lifetime only narrows the window |
+
+Comparison: sessions give immediate revocation and current roles at the cost of server state (lost on restart, not shared between instances); JWTs need no lookup but cannot be revoked or demoted before expiry without adding state (a denylist or token version), which is what the lecture's trade-off is about. Refresh tokens and token versioning were not implemented (owner approval needed).
+
+Commands: `npm run typecheck` clean; `npm test`: 138 tests, 138 pass.
+
 ### Not done
-- JWT experiment (claims inspection, tampered role, expiry, issuer/audience/algorithm, stale role with claims-only policy, client-only logout vs revocation, refresh): needs the `jose` dependency, whose installation was not permitted in the session. No custom crypto was written as a substitute.
-- Preferred authentication method is not confirmed by the owner (sessions are implemented as the proposal).
+- Preferred authentication method is not confirmed by the owner (sessions implemented as the proposal).
 - Implementation completion needs owner confirmation; lecture 07 review is a prerequisite per the note.

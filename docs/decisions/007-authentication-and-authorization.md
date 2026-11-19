@@ -1,6 +1,6 @@
 # ADR-007: Sessions with Bearer tokens, scrypt, role policy
 
-Status: Proposed (owner must confirm the adopted method; lecture 08 asks for this after the JWT comparison, which is not done yet)
+Status: Proposed (owner must confirm the adopted method after the JWT comparison)
 Date: 2026-11-19
 Related lecture: [08 — Authentication and authorization](../lectures/08-authentication-authorization.md)
 
@@ -17,5 +17,5 @@ Related lecture: [08 — Authentication and authorization](../lectures/08-authen
 ## Not production-ready
 No persistence, no shared session store, no per-IP global limiter, no HTTPS, no password reset or MFA, no session rotation on privilege change, no audit log. Duplicate registration reveals that a username exists (409), a conscious trade-off.
 
-## Open
-JWT experiment (jose) not implemented: installing the dependency was not permitted in this session. Stale-claim, tamper, issuer/audience/algorithm and revocation experiments remain.
+## JWT
+Tried in an isolated lab (`backend/experiments/jwt-lab.ts`, `jose`), not used by the server: stale roles and unrevokable tokens are why sessions are proposed. Status stays Proposed until the owner confirms the method.
