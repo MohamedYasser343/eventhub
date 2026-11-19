@@ -11,7 +11,8 @@ Last updated: 2026-11-19.
 - Next implementation milestone: lecture 07 — Serialization and Deserialization; not started, needs owner approval. [Assignment](lectures/07-serialization.md#eventhub-practical-assignment--coding-agent-handoff).
 - Backend language: Node/TypeScript, native `node:http`, `tsx` dev runner ([ADR-001](decisions/001-backend-language-and-tooling.md)).
 - Frontend: deferred until backend curriculum completion and explicit owner approval.
-- Tests/benchmarks: `npm test` 101/101 passing and `npm run typecheck` clean; no benchmarks.
+- Lectures 07 and 08 implemented on branches `feat/lecture-07-serialization` and `feat/lecture-08-auth`, awaiting owner review; lecture 08's JWT experiment is not done.
+- Tests/benchmarks: `npm test` 131/131 passing and `npm run typecheck` clean; no benchmarks.
 
 ## Milestones
 Track learning and implementation independently. Status values: not started, in progress, blocked, awaiting learner review, complete. Learning marked complete means the owner confirmed the session and its notes were documented; implementation marked complete means the assignment has demonstrated acceptance criteria and owner confirmation. Neither implies the other.
@@ -24,7 +25,7 @@ Track learning and implementation independently. Status values: not started, in 
 | 5 | Complete | Complete | [Understanding HTTP](lectures/05-http.md), 2026-11-16; no open technical questions recorded; full transcript unverified. | [Evidence: steps 1-9](lectures/05-http.md#step-1--server-and-health-2026-11-18) |
 | 6 | Complete | Complete | [Routing](lectures/06-routing.md), 2026-11-16; Express/Laravel matching discussion recorded; full transcript unavailable. | [Evidence](lectures/06-routing.md#implementation-evidence-coding-agent-complete) |
 | 7 | Complete | Awaiting learner review | [Serialization and Deserialization](lectures/07-serialization.md), 2026-11-19; process isolation, lossy JSON and performance trade-offs discussed; transcript not independently reverified during documentation. | [Evidence](lectures/07-serialization.md#implementation-evidence-coding-agent-awaiting-learner-review) |
-| 8 | Complete | Not started | [Authentication and authorization](lectures/08-authentication-authorization.md), 2026-11-19; stale JWT claims and revocation trade-offs discussed; full transcript not reviewed. | — |
+| 8 | Complete | Awaiting learner review (JWT lab pending) | [Authentication and authorization](lectures/08-authentication-authorization.md), 2026-11-19; stale JWT claims and revocation trade-offs discussed; full transcript not reviewed. | [Evidence](lectures/08-authentication-authorization.md#implementation-evidence-coding-agent-partial-awaiting-learner-review) |
 | 9 | Not started | Not started | — | — |
 | 10 | Not started | Not started | — | — |
 | 11 | Not started | Not started | — | — |

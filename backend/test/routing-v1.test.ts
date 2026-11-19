@@ -179,7 +179,7 @@ test("PATCH merges into the event as it is after the body arrives (no lost updat
     const req = http.request(
       {
         host: "127.0.0.1", port: Number(port), method: "PATCH", path: `/api/v1/events/${id}`,
-        headers: { "content-type": "application/json", "content-length": Buffer.byteLength(json) },
+        headers: { "content-type": "application/json", "content-length": Buffer.byteLength(json), authorization: `Bearer ${api.adminToken}` },
       },
       (res) => { res.resume(); resolve(res.statusCode ?? 0); },
     );

@@ -1,10 +1,12 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { fileURLToPath } from "node:url";
 import { parseQuery, Router, scalar } from "./router.ts";
 import type { Query, Registrar } from "./router.ts";
 import { readJsonBody } from "./json.ts";
+import { auth, eventOwners, publicUser, ticketsByUser } from "./auth.ts";
+import type { User } from "./auth.ts";
 
 export interface EventItem {
   id: number;
@@ -82,7 +84,7 @@ function handleOptions(req: IncomingMessage, res: ServerResponse, allow: string)
       headers["Access-Control-Allow-Methods"] = allow;
       // If-None-Match is not CORS-safelisted, so a conditional GET from the
       // browser is preflighted and must be approved explicitly.
-      headers["Access-Control-Allow-Headers"] = "Content-Type, If-None-Match";
+      headers["Access-Control-Allow-Headers"] = "Content-Type, If-None-Match, Authorization";
       headers["Access-Control-Max-Age"] = "600";
     }
   }
@@ -170,11 +172,122 @@ async function readJson(
   return null;
 }
 
+// ---------- authentication and authorization (lecture 08) ----------
+
+const NO_STORE = { "Cache-Control": "no-store" };
+
+function bearerToken(req: IncomingMessage): string | null {
+  const m = /^Bearer ([A-Za-z0-9_-]+)$/.exec(req.headers.authorization ?? "");
+  return m?.[1] ?? null;
+}
+
+// 401 when no valid session; the unread body is not drained (see ignoredBodyHeaders).
+function requireUser(req: IncomingMessage, res: ServerResponse): { user: User; token: string } | null {
+  const token = bearerToken(req);
+  const user = token ? auth.authenticate(token) : null;
+  if (!token || !user) {
+    const challenge = req.headers.authorization === undefined ? "Bearer" : 'Bearer error="invalid_token"';
+    sendJson(res, 401, { error: "Unauthorized" }, { "WWW-Authenticate": challenge, ...ignoredBodyHeaders(req) });
+    return null;
+  }
+  return { user, token };
+}
+
+function forbidden(req: IncomingMessage, res: ServerResponse): void {
+  sendJson(res, 403, { error: "Forbidden" }, ignoredBodyHeaders(req));
+}
+
+const canEdit = (user: User, eventId: number) =>
+  user.role === "admin" || (user.role === "organizer" && eventOwners.get(eventId) === user.id);
+
+const USERNAME = /^[A-Za-z0-9_]{3,32}$/;
+const MIN_PASSWORD = 12;
+const MAX_PASSWORD = 128; // bounds scrypt work per request
+
+async function register(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const body = await readJson(req, res);
+  if (!body) return;
+  const v = body.value;
+  const { username, password } =
+    typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  const details: string[] = [];
+  if (typeof username !== "string" || !USERNAME.test(username)) details.push("username must be 3-32 letters, digits or _");
+  if (typeof password !== "string" || password.length < MIN_PASSWORD || password.length > MAX_PASSWORD)
+    details.push(`password must be ${MIN_PASSWORD}-${MAX_PASSWORD} characters`);
+  if (details.length > 0) return sendJson(res, 422, { error: "Unprocessable Content", details }, NO_STORE);
+
+  // Any "role" in the body is ignored: public registration always creates an attendee.
+  const result = await auth.createUser(username as string, password as string, "attendee");
+  if (!result.ok) return sendJson(res, 409, { error: "Username already taken" }, NO_STORE);
+  sendJson(res, 201, publicUser(result.user), NO_STORE);
+}
+
+async function login(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const body = await readJson(req, res);
+  if (!body) return;
+  const v = body.value;
+  const { username, password } =
+    typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  if (typeof username !== "string" || typeof password !== "string" || password.length > MAX_PASSWORD || username.length > 64) {
+    return sendJson(res, 401, { error: "Invalid credentials" }, NO_STORE);
+  }
+  const key = `${req.socket.remoteAddress ?? "?"}|${username.toLowerCase()}`;
+  const wait = auth.limiter.retryAfter(key);
+  if (wait > 0) {
+    return sendJson(res, 429, { error: "Too Many Requests" }, { ...NO_STORE, "Retry-After": String(wait) });
+  }
+  const user = await auth.verifyCredentials(username, password);
+  if (!user) {
+    auth.limiter.fail(key);
+    // Same body for unknown user and wrong password.
+    return sendJson(res, 401, { error: "Invalid credentials" }, NO_STORE);
+  }
+  auth.limiter.clear(key);
+  const session = auth.createSession(user.id);
+  sendJson(res, 200, {
+    token: session.token,
+    tokenType: "Bearer",
+    expiresAt: new Date(session.expiresAt).toISOString(),
+    user: publicUser(user),
+  }, NO_STORE);
+}
+
+function logout(req: IncomingMessage, res: ServerResponse): void {
+  const a = requireUser(req, res);
+  if (!a) return;
+  auth.destroySession(a.token); // server-side revocation: the old token is dead immediately
+  res.writeHead(204, NO_STORE);
+  res.end();
+}
+
+function me(req: IncomingMessage, res: ServerResponse): void {
+  const a = requireUser(req, res);
+  if (a) sendJson(res, 200, publicUser(a.user), NO_STORE);
+}
+
+// Own tickets only: the caller comes from the session, never from the URL or query.
+function myTickets(req: IncomingMessage, res: ServerResponse): void {
+  const a = requireUser(req, res);
+  if (a) sendJson(res, 200, { data: ticketsByUser.get(a.user.id) ?? [] }, NO_STORE);
+}
+
+// Object-level check by id: someone else's ticket is indistinguishable from a missing one (404).
+function ticketById(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): void {
+  const a = requireUser(req, res);
+  if (!a) return;
+  const ticket = (ticketsByUser.get(a.user.id) ?? []).find((t) => t.ticketId === ctx.params["id"]);
+  if (!ticket) return sendJson(res, 404, { error: "Not Found" }, NO_STORE);
+  sendJson(res, 200, ticket, NO_STORE);
+}
+
 async function createEvent(
   req: IncomingMessage,
   res: ServerResponse,
   prefix: string,
 ): Promise<void> {
+  const a = requireUser(req, res);
+  if (!a) return;
+  if (a.user.role !== "organizer" && a.user.role !== "admin") return forbidden(req, res);
   const body = await readJson(req, res);
   if (!body) return;
 
@@ -187,6 +300,7 @@ async function createEvent(
 
   const event: EventItem = { id: nextId++, ...result.value };
   events.push(event);
+  eventOwners.set(event.id, a.user.id);
   sendJson(res, 201, event, { Location: `${prefix}/events/${event.id}` });
 }
 
@@ -197,10 +311,13 @@ async function replaceEvent(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
+  const a = requireUser(req, res);
+  if (!a) return;
   if (!events.some((e) => e.id === id)) {
     sendJson(res, 404, { error: "Not Found" }, ignoredBodyHeaders(req));
     return;
   }
+  if (!canEdit(a.user, id)) return forbidden(req, res);
 
   const body = await readJson(req, res);
   if (!body) return;
@@ -223,12 +340,16 @@ async function replaceEvent(
 }
 
 function deleteEvent(id: number, req: IncomingMessage, res: ServerResponse): void {
+  const a = requireUser(req, res);
+  if (!a) return;
   const index = events.findIndex((e) => e.id === id);
   if (index === -1) {
     sendJson(res, 404, { error: "Not Found" }, ignoredBodyHeaders(req));
     return;
   }
+  if (a.user.role !== "admin") return forbidden(req, res);
   events.splice(index, 1);
+  eventOwners.delete(id);
   res.writeHead(204, ignoredBodyHeaders(req));
   res.end();
 }
@@ -312,9 +433,12 @@ function bookingStub(req: IncomingMessage, res: ServerResponse): void {
 // PATCH changes only the fields sent (name and/or seats); the merged result is
 // validated like a full event, and nothing is stored if it is invalid.
 async function patchEvent(id: number, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const a = requireUser(req, res);
+  if (!a) return;
   if (!events.some((e) => e.id === id)) {
     return sendJson(res, 404, { error: "Not Found" }, ignoredBodyHeaders(req));
   }
+  if (!canEdit(a.user, id)) return forbidden(req, res);
 
   const body = await readJson(req, res);
   if (!body) return;
@@ -388,6 +512,18 @@ function registerEventRoutes(r: Registrar<AppHandler>, v1: boolean): void {
   if (v1) {
     r.add("GET", "/events/:id/tickets", listTickets, ID);
     r.add("OPTIONS", "/events/:id/tickets", optionsHandler, ID);
+    r.add("POST", "/auth/register", register);
+    r.add("OPTIONS", "/auth/register", optionsHandler);
+    r.add("POST", "/auth/login", login);
+    r.add("OPTIONS", "/auth/login", optionsHandler);
+    r.add("POST", "/auth/logout", logout);
+    r.add("OPTIONS", "/auth/logout", optionsHandler);
+    r.add("GET", "/auth/me", me);
+    r.add("OPTIONS", "/auth/me", optionsHandler);
+    r.add("GET", "/me/tickets", myTickets);
+    r.add("OPTIONS", "/me/tickets", optionsHandler);
+    r.add("GET", "/tickets/:id", ticketById);
+    r.add("OPTIONS", "/tickets/:id", optionsHandler);
     r.add("POST", "/bookings", bookingStub);
     r.add("OPTIONS", "/bookings", optionsHandler);
   }
@@ -452,6 +588,15 @@ export const server = createServer((req, res) => {
 const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 if (isMain) {
   const port = Number(process.env.PORT ?? 8080);
+  if (process.env.SEED_DEMO_USERS === "1") {
+    // Trusted startup path for privileged synthetic users; random passwords are
+    // printed once and never stored in the repository.
+    for (const role of ["organizer", "admin"] as const) {
+      const password = randomBytes(12).toString("base64url");
+      await auth.createUser(`demo_${role}`, password, role);
+      console.log(`demo user demo_${role} password ${password}`);
+    }
+  }
   server.listen(port, "127.0.0.1", () => {
     console.log(`EventHub listening on http://127.0.0.1:${port}`);
   });

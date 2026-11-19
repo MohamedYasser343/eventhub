@@ -246,11 +246,29 @@ Defer real database schema/migrations, Redis deployment, complete OAuth/OIDC pro
 - [x] Conceptual notes, discussion and assignment documented.
 - [x] Learning status updated independently in docs/PROGRESS.md in the same commit.
 
-## Implementation evidence (coding agent; initially pending)
+## Implementation evidence (coding agent; partial, awaiting learner review)
 
-No implementation, experiments or tests were run as part of this learning-documentation work. Preserve the teaching notes; append actual environment, commands, results, edge cases and relevant decisions after implementation.
+Date: 2026-11-19. Environment: Linux, Node v24, `tsx`, native `node:http`, no new dependencies. Decision: [ADR-007](../decisions/007-authentication-and-authorization.md) (proposed). Code: `backend/src/auth.ts`, auth handlers and policy in `backend/src/server.ts`. Tests: `backend/test/auth.test.ts` (17 new), test helper `backend/test/helpers.ts`.
 
-- [ ] Implementation or reproducible experiment.
-- [ ] Acceptance criteria demonstrated.
-- [ ] Negative cases and regression checks as applicable.
-- [ ] Implementation progress updated and learner confirmed.
+Commands: `cd backend && npm run typecheck` (clean); `npm test`: 131 tests, 131 pass, 0 fail (114 earlier tests still pass; four earlier tests needed edits, see below). No benchmarks.
+
+### Done (automated)
+| Criterion | Evidence |
+| --- | --- |
+| scrypt hashing, unique salts | Two users, same password: different encoded hashes, both verify; response has no password/hash; wrong password fails |
+| Login, generic error, rate limit | Wrong password and unknown user return identical 401 bodies; 5 failures then 429 + Retry-After, window reset with a controlled clock |
+| No privilege via registration | `role`/`id` in the body ignored: attendee; owner from a body field ignored |
+| 401 negative cases | Missing, wrong scheme, malformed, tampered, unknown, expired token: 401 + `WWW-Authenticate`, no mutation |
+| 403 / ownership | Attendee refused on POST/PUT/PATCH/DELETE; organizer edits own event, not another's; admin edits any; DELETE admin only |
+| Own tickets only | `/me/tickets` ignores `?userId=`; `/tickets/:id` of another user is 404, identical to a missing ticket |
+| Session lifecycle | Login, authenticated call, logout (204), replay 401, other sessions unaffected; expiry one tick before/after the TTL; a new `AuthService` (restart or other instance) rejects tokens |
+| Role changes | Demoted organizer is refused on the next request with the same token (role read per request) |
+| Regression | Legacy and v1 routing, HEAD/OPTIONS, CORS, ETag and JSON tests pass |
+
+### Changes to earlier tests
+Event/routing tests authenticate as a synthetic admin through `useServer()` (it adds a Bearer header to `fetch`); two raw `http.request` calls got the header explicitly; the CORS preflight test now expects `Access-Control-Allow-Headers: Content-Type, If-None-Match, Authorization`. Unauthenticated writes to the legacy routes now give 401 (see ADR-007).
+
+### Not done
+- JWT experiment (claims inspection, tampered role, expiry, issuer/audience/algorithm, stale role with claims-only policy, client-only logout vs revocation, refresh): needs the `jose` dependency, whose installation was not permitted in the session. No custom crypto was written as a substitute.
+- Preferred authentication method is not confirmed by the owner (sessions are implemented as the proposal).
+- Implementation completion needs owner confirmation; lecture 07 review is a prerequisite per the note.

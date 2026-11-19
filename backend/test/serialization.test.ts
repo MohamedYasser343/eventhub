@@ -16,6 +16,7 @@ beforeEach(() => {
 });
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
+const bearer = () => ({ Authorization: `Bearer ${api.adminToken}` });
 const post = (body: BodyInit, headers: Record<string, string> = JSON_HEADERS) =>
   fetch(`${api.base}/api/v1/events`, { method: "POST", headers, body });
 
@@ -29,7 +30,7 @@ function raw(
   const url = new URL(api.base);
   return new Promise((resolve, reject) => {
     const req = request(
-      { host: url.hostname, port: url.port, path, method: "POST", headers },
+      { host: url.hostname, port: url.port, path, method: "POST", headers: { ...bearer(), ...headers } },
       (res) => {
         const out: Buffer[] = [];
         res.on("data", (c: Buffer) => out.push(c));
@@ -132,7 +133,7 @@ test("a client that aborts mid-body does not hang or mutate; server keeps servin
   await new Promise<void>((resolve) => {
     const req = request(
       { host: url.hostname, port: url.port, path: "/api/v1/events", method: "POST",
-        headers: { ...JSON_HEADERS, "Content-Length": "100" } },
+        headers: { ...bearer(), ...JSON_HEADERS, "Content-Length": "100" } },
     );
     req.on("error", () => resolve());
     req.write('{"name":"Abor');
