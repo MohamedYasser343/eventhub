@@ -209,11 +209,33 @@ Owner approval to begin implementation; inspect latest code at that time; decide
 - [x] Conceptual notes, discussion and assignment documented.
 - [x] Learning status updated independently in docs/PROGRESS.md.
 
-## Implementation evidence (coding agent; initially pending)
+## Implementation evidence (coding agent; awaiting learner review)
 
-Preserve the teaching material above. Append changes, environment, commands, expected vs observed results, negative cases, regressions and decisions. No tests or benchmarks were run for this documentation commit.
+Date: 2026-11-19. Environment: Linux, Node v24, `tsx`, native `node:http`, no new dependencies. Decision: [ADR-006](../decisions/006-json-boundary-policy.md). Code: `backend/src/json.ts` (extracted helpers), `backend/src/server.ts`. Tests: `backend/test/serialization.test.ts` (13 new). Experiment: `backend/experiments/json-lossiness.ts`.
 
-- [ ] Implementation or reproducible experiment.
-- [ ] Acceptance criteria demonstrated.
-- [ ] Negative cases and regression checks as applicable.
-- [ ] Implementation progress updated and learner confirmed.
+Commands: `cd backend && npm run typecheck` (clean); `npm test`: 114 tests, 114 pass, 0 fail (101 earlier unchanged). Baseline before changes: 101/101. No benchmarks; Protobuf comparison skipped (optional, needs dependency approval).
+
+### Reused versus improved
+Reused: `sendJson`, `validateNewEvent`, 16 KiB limit, 415/413/400/422 mapping, explicit `{id,name,seats}` projection. Lifecycle: `IncomingMessage` chunks (Buffers) -> `Buffer.concat` -> strict UTF-8 decode -> `JSON.parse` (unknown) -> validation -> store -> projection -> `JSON.stringify` -> `Content-Length` = `Buffer.byteLength`.
+Improved: invalid UTF-8 now 400 (was silently repaired); BOM rejected; non-utf-8 charset 415; `Content-Encoding` gzip 415; aborted upload no longer leaves a pending promise.
+
+### Demonstrated (automated)
+| Case | Result |
+| --- | --- |
+| "Café Meetup ☕" POST | 201, `application/json; charset=utf-8`, Content-Length equals body bytes (9 bytes vs 6 UTF-16 units for "Café ☕") |
+| "é" split across two TCP chunks | 201, name intact |
+| Invalid UTF-8 bytes / BOM | 400, no mutation |
+| `charset=latin1` / `gzip` encoding | 415 |
+| Empty body | 400 |
+| `null`, `[]`, `42`, `"text"`, `true` | 422 |
+| `seats:"30"` | 422; `{"name":"M",}` 400 |
+| Exactly 16384 bytes / 16385 bytes | 201 / 413 |
+| Chunked, no Content-Length, 20 KiB | 413 |
+| Client aborts mid-body | no mutation, server still serves |
+| `id`, `role`, `ownerId` in input | not persisted, not returned |
+
+### Lossiness experiment
+`npx tsx experiments/json-lossiness.ts`: Date becomes a string; `undefined` keys vanish; `undefined`/functions in arrays become `null`; `NaN`/`Infinity` become `null`; `Map` becomes `{}`; `-0` becomes `0`; integers above 2^53 lose precision (`12345678901234567890` parses as `12345678901234567000`); `BigInt` and circular structures throw at stringify.
+
+### Open items
+Request decompression and Protobuf are not implemented. Owner confirmation of implementation completion is pending.

@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { fileURLToPath } from "node:url";
 import { parseQuery, Router, scalar } from "./router.ts";
 import type { Query, Registrar } from "./router.ts";
+import { readJsonBody } from "./json.ts";
 
 export interface EventItem {
   id: number;
@@ -20,7 +21,6 @@ export const events: EventItem[] = [
 // Monotonic counter: an id is never reused, even after its event is deleted.
 let nextId = Math.max(0, ...events.map((e) => e.id)) + 1;
 
-const MAX_BODY_BYTES = 16 * 1024;
 const MAX_NAME_LENGTH = 100;
 const MAX_SEATS = 100_000;
 
@@ -116,37 +116,6 @@ function sendEvent(req: IncomingMessage, res: ServerResponse, event: EventItem):
   sendJson(res, 200, event, headers);
 }
 
-// Resolves with the body text, or null if it exceeds `limit` bytes.
-function readBody(req: IncomingMessage, limit: number): Promise<string | null> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    let settled = false;
-    req.on("data", (chunk: Buffer) => {
-      if (settled) return;
-      size += chunk.length;
-      if (size > limit) {
-        settled = true;
-        chunks.length = 0;
-        resolve(null);
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on("end", () => {
-      if (settled) return;
-      settled = true;
-      resolve(Buffer.concat(chunks).toString("utf8"));
-    });
-    req.on("error", reject);
-  });
-}
-
-function isJsonContentType(header: string | undefined): boolean {
-  const mediaType = (header ?? "").split(";")[0]?.trim().toLowerCase();
-  return mediaType === "application/json";
-}
-
 type Validation =
   | { ok: true; value: Omit<EventItem, "id"> }
   | { ok: false; details: string[] };
@@ -187,38 +156,18 @@ function ignoredBodyHeaders(req: IncomingMessage): Record<string, string> {
   return hasBody ? { Connection: "close" } : {};
 }
 
-// Reads and parses a JSON request body. On any problem the error response
-// (415/413/400) has already been sent and null is returned. Wrapping the value
-// lets a legitimate JSON `null` body be told apart from failure.
+// Reads and parses a JSON request body (see json.ts). On any problem the error
+// response (415/413/400) has already been sent and null is returned. Wrapping the
+// value lets a legitimate JSON `null` body be told apart from failure.
 async function readJson(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<{ value: unknown } | null> {
-  const closeConn = { Connection: "close" };
-
-  if (!isJsonContentType(req.headers["content-type"])) {
-    sendJson(res, 415, { error: "Content-Type must be application/json" }, closeConn);
-    return null;
-  }
-
-  const declared = Number(req.headers["content-length"]);
-  if (declared > MAX_BODY_BYTES) {
-    sendJson(res, 413, { error: "Payload Too Large" }, closeConn);
-    return null;
-  }
-
-  const text = await readBody(req, MAX_BODY_BYTES);
-  if (text === null) {
-    sendJson(res, 413, { error: "Payload Too Large" }, closeConn);
-    return null;
-  }
-
-  try {
-    return { value: JSON.parse(text) };
-  } catch {
-    sendJson(res, 400, { error: "Malformed JSON" });
-    return null;
-  }
+  const result = await readJsonBody(req);
+  if (result.ok) return { value: result.value };
+  // 400 leaves the connection usable; 413/415 may leave an unread body behind.
+  sendJson(res, result.status, { error: result.error }, result.status === 400 ? {} : { Connection: "close" });
+  return null;
 }
 
 async function createEvent(

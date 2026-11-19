@@ -23,7 +23,7 @@ Track learning and implementation independently. Status values: not started, in 
 | 4 | Not confirmed | Not confirmed | [First principles benefits](lectures/04-first-principles-benefits.md) — reference | — |
 | 5 | Complete | Complete | [Understanding HTTP](lectures/05-http.md), 2026-11-16; no open technical questions recorded; full transcript unverified. | [Evidence: steps 1-9](lectures/05-http.md#step-1--server-and-health-2026-11-18) |
 | 6 | Complete | Complete | [Routing](lectures/06-routing.md), 2026-11-16; Express/Laravel matching discussion recorded; full transcript unavailable. | [Evidence](lectures/06-routing.md#implementation-evidence-coding-agent-complete) |
-| 7 | Complete | Not started | [Serialization and Deserialization](lectures/07-serialization.md), 2026-11-19; process isolation, lossy JSON and performance trade-offs discussed; transcript not independently reverified during documentation. | — |
+| 7 | Complete | Awaiting learner review | [Serialization and Deserialization](lectures/07-serialization.md), 2026-11-19; process isolation, lossy JSON and performance trade-offs discussed; transcript not independently reverified during documentation. | [Evidence](lectures/07-serialization.md#implementation-evidence-coding-agent-awaiting-learner-review) |
 | 8 | Complete | Not started | [Authentication and authorization](lectures/08-authentication-authorization.md), 2026-11-19; stale JWT claims and revocation trade-offs discussed; full transcript not reviewed. | — |
 | 9 | Not started | Not started | — | — |
 | 10 | Not started | Not started | — | — |
