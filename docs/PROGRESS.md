@@ -1,14 +1,14 @@
 # Progress tracker
 
-Last updated: 2026-11-18.
+Last updated: 2026-11-19.
 
 ## Current state
 - Repository initialization: documentation foundations prepared.
-- Learning: lectures 05–06 complete (owner confirmed 2026-11-16); reference notes for 01–04 prepared, completion not confirmed.
+- Learning: lectures 05–07 complete (05–06 confirmed 2026-11-16; 07 confirmed 2026-11-19); reference notes for 01–04 prepared, completion not confirmed.
 - Implementation: lecture 05 complete (owner confirmed 2026-11-18; endpoints, CORS, ETag and experiments demonstrated; optional gzip deferred; ADR-001 to ADR-004).
-- Next learning milestone: playlist position 7 (provisional: Serialization; verify actual video title and scope).
+- Next learning milestone: playlist position 8 (provisional: Authentication/authorization; verify actual video title and scope).
 - Implementation: lecture 06 complete (owner confirmed 2026-11-18; router, v1 routes, collision experiment, edge cases; ADR-005).
-- Next implementation milestone: lecture 07 — Serialization; not started, needs owner approval.
+- Next implementation milestone: lecture 07 — Serialization and Deserialization; not started, needs owner approval. [Assignment](lectures/07-serialization.md#eventhub-practical-assignment--coding-agent-handoff).
 - Backend language: Node/TypeScript, native `node:http`, `tsx` dev runner ([ADR-001](decisions/001-backend-language-and-tooling.md)).
 - Frontend: deferred until backend curriculum completion and explicit owner approval.
 - Tests/benchmarks: `npm test` 101/101 passing and `npm run typecheck` clean; no benchmarks.
@@ -23,7 +23,7 @@ Track learning and implementation independently. Status values: not started, in 
 | 4 | Not confirmed | Not confirmed | [First principles benefits](lectures/04-first-principles-benefits.md) — reference | — |
 | 5 | Complete | Complete | [Understanding HTTP](lectures/05-http.md), 2026-11-16; no open technical questions recorded; full transcript unverified. | [Evidence: steps 1-9](lectures/05-http.md#step-1--server-and-health-2026-11-18) |
 | 6 | Complete | Complete | [Routing](lectures/06-routing.md), 2026-11-16; Express/Laravel matching discussion recorded; full transcript unavailable. | [Evidence](lectures/06-routing.md#implementation-evidence-coding-agent-complete) |
-| 7 | Not started | Not started | — | — |
+| 7 | Complete | Not started | [Serialization and Deserialization](lectures/07-serialization.md), 2026-11-19; process isolation, lossy JSON and performance trade-offs discussed; transcript not independently reverified during documentation. | — |
 | 8 | Not started | Not started | — | — |
 | 9 | Not started | Not started | — | — |
 | 10 | Not started | Not started | — | — |
