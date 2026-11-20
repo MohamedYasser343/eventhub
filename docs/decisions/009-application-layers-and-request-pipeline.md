@@ -19,6 +19,15 @@ Related lecture: [10 — Application layers](../lectures/10-application-layers.m
 - **Cancellation policy** (`modules/bookings/cancellation-policy.ts`): pure function with an injected `now`; owner or admin, ≥ 24 h inclusive, admin overrides ownership/time but not a non-active booking. No endpoint (booking stays a 501 stub).
 - **Abort signal** is created per request but not yet consumed by any operation.
 
+## Amendment (2026-11-20): layers extended to the whole backend
+Requested by the owner after review of PR #7.
+- **Per-module controllers.** `modules/{events,auth,tickets}/controller.ts` are factories (`createXController(service)`) so dependencies are injected by hand. `server.ts` now only composes (builds repositories, services, controllers), registers routes and runs the pipeline. Shared HTTP plumbing (`RouteContext`, `sendJson`, `readJson`, error helpers, `createProtect`) lives in `http/app.ts`, so controllers never import `server.ts`.
+- **Auth.** `AccountService` (`modules/auth/service.ts`) owns register/login/logout rules (username/password limits, role always `attendee`, rate-limit key, same outcome for unknown user and wrong password) and returns typed outcomes. `AuthService` in `auth.ts` stays the storage/crypto/session mechanism (users, scrypt, sessions, limiter) and plays the repository role; it was not split further to avoid churn in the lecture 08 code and tests.
+- **Tickets.** `TicketRepository` wraps the existing map; `TicketService` has own-tickets, object-level ownership (foreign ticket = missing) and the synthetic per-event list (uses `EventService.get`).
+- **Auth middleware is injected** (`createProtect(auth)`), not read from a module singleton.
+- **Not layered, on purpose:** `/bookings` is still a 501 stub (no service/repository until booking is a real lecture); `validation.ts` stays a pure module used by services; CORS/OPTIONS stay in `server.ts` as pipeline infrastructure.
+- No API, status, header or body changed; the 166 earlier tests pass untouched.
+
 ## Trade-offs
 - Only events were moved; auth, tickets and validation stay as before (smallest representative slice).
 - `protect()` wraps each handler in its own tiny `compose`; a shared route-middleware list on the router is a possible later step.

@@ -257,7 +257,9 @@ Environment: Node via `tsx`, branch `feat/lecture-10-application-layers`, 2026-1
 
 **Cancellation policy** (fixed clock): owner 30 h allow; exactly 24 h allow; 23 h and 1 s short deny; non-owner deny; admin 1 h allow; cancelled/completed deny even for admin.
 
-**Limitations / deliberate simplifications:** only the events module was layered (auth, tickets, validation untouched); repository is synchronous (see ADR); abort signal exists but nothing consumes it; a client-supplied `X-Request-Id` is trusted after format validation only; LOG format changed from plain text to JSON; no trace of a real concurrent-load run.
+**Extension to the rest of the backend (owner request after review, branch `refactor/layers-auth-tickets`):** per-module controller factories for events, auth and tickets; `AccountService`, `TicketRepository`/`TicketService`; shared HTTP kit `src/http/app.ts`; `server.ts` reduced to composition root, route table and pipeline (about 260 lines, was about 540). Observed: `npm test` 190/190 (184 + 6 new in `test/services.test.ts`: register role ignored, validation/duplicate, uniform login failure, rate limit then logout, own-tickets only, synthetic tickets cap), `npm run typecheck` clean. Details in the ADR-009 amendment.
+
+**Limitations / deliberate simplifications:** events, auth and tickets were layered (see extension above); `AuthService` doubles as auth repository; booking is still a stub; repository is synchronous (see ADR); abort signal exists but nothing consumes it; a client-supplied `X-Request-Id` is trusted after format validation only; LOG format changed from plain text to JSON; no trace of a real concurrent-load run.
 
 - [x] Implementation or reproducible experiment.
 - [x] Acceptance criteria demonstrated (see above).

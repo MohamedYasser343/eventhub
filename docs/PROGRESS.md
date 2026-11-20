@@ -12,7 +12,7 @@ Last updated: 2026-11-20.
 - Backend language: Node/TypeScript, native `node:http`, `tsx` dev runner ([ADR-001](decisions/001-backend-language-and-tooling.md)).
 - Frontend: deferred until backend curriculum completion and explicit owner approval.
 - Lectures 07 and 08 implemented on branches `feat/lecture-07-serialization` and `feat/lecture-08-auth`, confirmed by the owner; JWT lab done (`jose` added).
-- Tests/benchmarks: `npm test` 184/184 passing and `npm run typecheck` clean; no benchmarks.
+- Tests/benchmarks: `npm test` 190/190 passing and `npm run typecheck` clean; no benchmarks.
 
 ## Milestones
 Track learning and implementation independently. Status values: not started, in progress, blocked, awaiting learner review, complete. Learning marked complete means the owner confirmed the session and its notes were documented; implementation marked complete means the assignment has demonstrated acceptance criteria and owner confirmation. Neither implies the other.
