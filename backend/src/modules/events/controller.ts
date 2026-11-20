@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { scalar } from "../../router.ts";
-import { PAGE_SIZE, parseListQuery } from "../../validation.ts";
+import { parseListQuery } from "../../validation.ts";
 import { badQuery, forbidden, idOf, ignoredBodyHeaders, notFound, readJson, sendJson, unprocessable } from "../../http/app.ts";
 import type { Authed, RouteContext } from "../../http/app.ts";
 import type { EventItem } from "./repository.ts";
@@ -55,24 +55,20 @@ export function createEventsController(events: EventService) {
       sendJson(res, 200, events.list());
     },
 
-    // Query policy (validation.ts): city, sort and page are scalar (a repeated key
-    // is a 400); sort is "id|name|seats" with an optional "-" for descending; page
-    // is a positive integer of at most 9 digits. Unknown keys are ignored. Events
-    // have no city, so city is accepted and echoed back but does not filter
-    // (deliberate simplification).
+    // Query policy (validation.ts, ADR-010): city, q, minSeats, sort, page and limit
+    // are scalar (a repeated key is a 400). sort is "id|name|seats" with an optional
+    // "-" for descending, ties broken by id. page >= 1 (at most 9 digits), limit 1..100
+    // (default 10); invalid values are rejected, not capped. A page past the end is a
+    // valid query: 200 with an empty data array. Unknown keys are ignored. Events have
+    // no city, so city is echoed back but does not filter (deliberate simplification).
     listV1(_req: IncomingMessage, res: ServerResponse, ctx: RouteContext): void {
-      const q = parseListQuery(ctx.query);
-      if (!q.ok) return badQuery(res, q.errors);
-      const { city, sort, page, offset } = q.value;
-      const all = events.list();
-      const sorted = [...all].sort((a, b) => {
-        const x = a[sort.field];
-        const y = b[sort.field];
-        return (x < y ? -1 : x > y ? 1 : 0) * sort.direction;
-      });
+      const parsed = parseListQuery(ctx.query);
+      if (!parsed.ok) return badQuery(res, parsed.errors);
+      const { city, q, minSeats, sort, page, limit } = parsed.value;
+      const r = events.query(parsed.value);
       sendJson(res, 200, {
-        data: sorted.slice(offset, offset + PAGE_SIZE),
-        meta: { page, pageSize: PAGE_SIZE, total: all.length, sort: sort.text, city },
+        data: r.data,
+        meta: { page, pageSize: limit, total: r.total, totalPages: r.totalPages, sort: sort.text, city, q, minSeats },
       });
     },
 

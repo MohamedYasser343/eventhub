@@ -4,7 +4,7 @@
 - Playlist position: 11, corroborated by transcript-derived course notes (123:34).
 - Date: 2026-11-20.
 - Learning status: complete (owner explicitly requested GitHub update following the lesson).
-- Implementation status: not started.
+- Implementation status: complete (owner confirmed 2026-11-20).
 - Sources: third-party copy of YouTube auto-captions and timestamped lecture notes; original video and playlist order were not independently replayed. ASR may contain errors. The examples using EventHub, HTTP specification corrections and production extensions below are supplementary.
 
 ## Learning objectives
@@ -162,11 +162,28 @@ Resource = what; method = requested operation; status = outcome; representation 
 - [x] Conceptual notes, discussion and assignment documented.
 - [x] Learning status updated independently in docs/PROGRESS.md.
 
-## Implementation evidence (coding agent; initially pending)
+## Implementation evidence (coding agent)
 
-No code changes, tests or experiments executed during this documentation update.
+Environment: Linux, Node via `tsx`, `node:test`, in-memory store, synthetic data. Branch `feat/lecture-11-rest-api-design`. Decision record: [ADR-010](../decisions/010-rest-collection-contract.md) (contract table, defaults, trade-offs). Owner decision: `totalPages` exposed.
 
-- [ ] Implementation or reproducible experiment.
-- [ ] Acceptance criteria demonstrated.
-- [ ] Negative cases and regression checks.
-- [ ] Implementation progress updated and learner confirmed.
+Baseline before changes: `npm test` 190/190, `npm run typecheck` clean (so the new count is 198, i.e. +8 new tests; two existing assertions were updated for the additive `meta` fields and `ListQuery` shape).
+
+Changes: `parseLimit`/`parseMinSeats`/`parseNameFilter` and the extended `parseListQuery` in `src/validation.ts`; `EventService.query()` (filter -> sort + id tie-break -> slice, total, totalPages) in `src/modules/events/service.ts`; `listV1` in the controller now only parses and serializes. No new dependency; CRUD handlers untouched.
+
+Results (`cd backend && npm test && npm run typecheck`): 198/198 pass, typecheck clean. New file `test/rest-api-design.test.ts`:
+- Criterion 1/6: PATCH keeps unrelated fields and repeats identically; PUT replaces; incomplete PUT is 422 with no mutation; DELETE 204 empty body then 404, event gone.
+- Criterion 2: `q=no-such-event-xyz` is 200, `data: []`, total 0, totalPages 0; unknown id is 404.
+- Criterion 3: 23 seeded matching events, `limit=10`: page sizes 10/10/3, total 23, totalPages 3, 23 distinct ids in id order, repeat of page 2 identical, page 4 empty.
+- Criterion 4: defaults (page 1, limit 10); 16 invalid variants (`limit=0,-1,1.5,abc,'',101,1000,010,repeated`, `minSeats` negative/decimal/empty/repeated, repeated or oversized `q`) are 400; errors aggregated in fixed order.
+- Criterion 5: combined `q` + `sort=-seats` over tied seat values with non-matching events present: order equals the id-tie-broken expectation, pages concatenate to the full list, total excludes non-matching and `minSeats` filters before counting.
+- Criterion 7: anonymous POST/PATCH/DELETE 401; other organizer PATCH/PUT/DELETE 403; body `id` ignored; 405 + `Allow`, HEAD and legacy list still work. Existing CORS, ETag, auth, layer tests still pass.
+- Criterion 8: custom action not implemented (no lifecycle); trade-off documented in ADR-010.
+
+Experiment `backend/experiments/pagination-size.ts` (500 synthetic events, one local run, single sample so not a benchmark): `limit=10` 590 bytes, `limit=100` 4998 bytes, `limit=100&page=5` 5319 bytes; `limit=1000` returns 400. Shows payload is bounded by `limit`; no latency claim is made.
+
+Limitations: the id tie-break is correct by construction, but since ids are monotonic and insertion-ordered the tie test would also pass with a stable sort alone, so it cannot isolate the explicit tie-break. Offset pagination shifts under concurrent inserts (documented, not fixed). "Authorized scope" is all events because events are public.
+
+- [x] Implementation or reproducible experiment.
+- [x] Acceptance criteria demonstrated (see above).
+- [x] Negative cases and regression checks.
+- [x] Implementation progress confirmed by learner (2026-11-20).
