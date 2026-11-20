@@ -141,9 +141,39 @@ Validate external data at boundaries; transform into explicit typed values; keep
 - [x] Conceptual notes, discussion and assignment documented.
 - [x] Learning status updated independently in docs/PROGRESS.md in the same commit.
 
-## Implementation evidence (coding agent; initially pending)
-No implementation, tests or benchmarks were performed for lecture 09 by the mentor.
-- [ ] Implementation or reproducible experiment.
-- [ ] Acceptance criteria demonstrated.
-- [ ] Negative cases and regression checks as applicable.
-- [ ] Implementation progress updated and learner confirmed.
+## Implementation evidence (coding agent; awaiting learner review)
+
+Date: 2026-11-20. Environment: Linux, Node v24, `tsx`, native `node:http`, no new dependencies. Branch `feat/lecture-09-validation`. Decision: [ADR-008](../decisions/008-validation-policy.md) (proposed). Code: `backend/src/validation.ts` (new), wiring in `backend/src/server.ts`. Tests: `backend/test/validation.test.ts` (unit), `backend/test/validation-http.test.ts` (HTTP).
+
+Commands: baseline before changes `cd backend && npm test` 138/138 and `npm run typecheck` clean. After: `npm run typecheck` clean; `npm test` 166 tests, 166 pass, 0 fail (138 earlier tests unchanged and passing, 28 new). One new unit test first failed (query error order was not deterministic); the code was fixed to a fixed order, not the test. No benchmarks.
+
+### Done (automated)
+| Criterion | Evidence |
+| --- | --- |
+| Reusable native validators, typed results | `validateEventInput`, `validateEventPatch`, `parseListQuery`, `parsePage`, `parseSort`, `parseId`, `validateBookingInput`, `priceBooking` |
+| Unified field errors | 422 and 400 bodies keep `details` and add `errors[{path,code,message}]` (legacy messages and statuses unchanged) |
+| Type, shape, required, string-vs-number, array/null | unit tests for `null`, `[]`, string, number, `{}`, `"5"`, `null`, `[]` fields |
+| Name and seats boundaries | empty, whitespace-only, 1, 100, 101 (trim first); seats -1, 0, 100000, 100001, 1.5, 1e21, MAX_SAFE_INTEGER+2 |
+| PATCH | absent keeps current; `seats: 0` valid; `null`/`""` rejected; empty or unknown-only body `PATCH_EMPTY`; inputs not mutated |
+| Invalid writes do not mutate | HTTP test: five invalid POST/PUT/PATCH requests leave `events`, `eventOwners` unchanged and consume no id (next two creates are consecutive) |
+| Query | repeated page/sort/city, `page=` / `2e1` / `0` / 10 digits / 20 digits rejected; defaults, sort, city echo and unknown keys unchanged |
+| Safe path ids | ids above 2^53 give 404 for GET/PUT/DELETE and `/tickets`; nothing is modified |
+| Write-field injection | `id`, `role`, `ownerId` in a POST body are ignored, stored event has only id/name/seats |
+| Booking exercise | unknown `ticketPrice`/`total`/`role` rejected; total = server price x quantity in minor units; forged values cannot lower it; stale expectation gives `PRICE_CHANGED` with the current price; absent expectation uses the current price; unsafe total refused |
+| Regression | malformed JSON 400, wrong media type 415, oversize 413 unchanged; `/bookings` still 501; all HEAD/OPTIONS, CORS, ETag, routing, serialization and auth tests pass |
+
+### Manual check (curl against a local server, synthetic demo organizer)
+- `POST {"name":"  ","seats":"5"}` -> 422 with `name:LENGTH` and `seats:RANGE`; events list unchanged afterwards.
+- `POST {"id":1,"name":"  Padded  ","seats":0,"role":"admin"}` -> 201 `{"id":3,"name":"Padded","seats":0}`: id 3 proves the invalid request consumed no id; name trimmed; injected id/role ignored.
+- `PATCH /events/1 {"name":null}` as an organizer who does not own event 1 -> 403: authorization still runs before validation.
+- `Content-Type: text/plain` -> 415; `{bad` -> 400 `Malformed JSON`.
+
+### Decisions needing the owner
+- ADR-008 is proposed. Confirm: additive `errors` next to `details`; legacy endpoints keep ignoring extra fields; quantity range 1-10; no `limit` parameter; UTF-16 name length.
+- The booking pricing exercise is not wired to `POST /api/v1/bookings` (needs explicit approval).
+
+### Not done
+- Strict unknown-field rejection on legacy endpoints (breaking change, not approved).
+- Header validation beyond what the app already consumes (bearer, content type); no new headers are read.
+- Persistence-level constraints and concurrency (deferred by the lecture).
+- Learner confirmation; implementation status stays "awaiting learner review".

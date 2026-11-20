@@ -8,11 +8,11 @@ Last updated: 2026-11-20.
 - Implementation: lecture 05 complete (owner confirmed 2026-11-18; endpoints, CORS, ETag and experiments demonstrated; optional gzip deferred; ADR-001 to ADR-004).
 - Next learning milestone: playlist position 10 (provisional: Application layers; verify actual video title and scope).
 - Implementation: lecture 06 complete (owner confirmed 2026-11-18; router, v1 routes, collision experiment, edge cases; ADR-005).
-- Implementation: lectures 07 and 08 complete (owner confirmed 2026-11-19; ADR-006, ADR-007). Next implementation milestone: position 9, after owner approval; lecture note is available.
+- Implementation: lectures 07 and 08 complete (owner confirmed 2026-11-19; ADR-006, ADR-007). Lecture 09 implemented on branch `feat/lecture-09-validation` (ADR-008 proposed), awaiting owner confirmation.
 - Backend language: Node/TypeScript, native `node:http`, `tsx` dev runner ([ADR-001](decisions/001-backend-language-and-tooling.md)).
 - Frontend: deferred until backend curriculum completion and explicit owner approval.
 - Lectures 07 and 08 implemented on branches `feat/lecture-07-serialization` and `feat/lecture-08-auth`, confirmed by the owner; JWT lab done (`jose` added).
-- Tests/benchmarks: `npm test` 138/138 passing and `npm run typecheck` clean; no benchmarks.
+- Tests/benchmarks: `npm test` 166/166 passing and `npm run typecheck` clean; no benchmarks.
 
 ## Milestones
 Track learning and implementation independently. Status values: not started, in progress, blocked, awaiting learner review, complete. Learning marked complete means the owner confirmed the session and its notes were documented; implementation marked complete means the assignment has demonstrated acceptance criteria and owner confirmation. Neither implies the other.
@@ -26,7 +26,7 @@ Track learning and implementation independently. Status values: not started, in 
 | 6 | Complete | Complete | [Routing](lectures/06-routing.md), 2026-11-16; Express/Laravel matching discussion recorded; full transcript unavailable. | [Evidence](lectures/06-routing.md#implementation-evidence-coding-agent-complete) |
 | 7 | Complete | Complete | [Serialization and Deserialization](lectures/07-serialization.md), 2026-11-19; process isolation, lossy JSON and performance trade-offs discussed; transcript not independently reverified during documentation. | [Evidence](lectures/07-serialization.md#implementation-evidence-coding-agent-complete) |
 | 8 | Complete | Complete | [Authentication and authorization](lectures/08-authentication-authorization.md), 2026-11-19; stale JWT claims and revocation trade-offs discussed; full transcript not reviewed. | [Evidence](lectures/08-authentication-authorization.md#implementation-evidence-coding-agent-complete) |
-| 9 | Complete | Not started | [Validation & Transformation](lectures/09-validation-transformation.md), 2026-11-20; source-of-truth and stale price discussion recorded; full transcript not independently reverified. | — |
+| 9 | Complete | Awaiting learner review | [Validation & Transformation](lectures/09-validation-transformation.md), 2026-11-20; source-of-truth and stale price discussion recorded; full transcript not independently reverified. | [Evidence](lectures/09-validation-transformation.md#implementation-evidence-coding-agent-awaiting-learner-review) |
 | 10 | Not started | Not started | — | — |
 | 11 | Not started | Not started | — | — |
 | 12 | Not started | Not started | — | — |

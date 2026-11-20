@@ -3,6 +3,8 @@ import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { fileURLToPath } from "node:url";
 import { parseQuery, Router, scalar } from "./router.ts";
+import { detailsOf, PAGE_SIZE, parseId, parseListQuery, validateEventInput, validateEventPatch } from "./validation.ts";
+import type { FieldError } from "./validation.ts";
 import type { Query, Registrar } from "./router.ts";
 import { readJsonBody } from "./json.ts";
 import { auth, eventOwners, publicUser, ticketsByUser } from "./auth.ts";
@@ -22,9 +24,6 @@ export const events: EventItem[] = [
 
 // Monotonic counter: an id is never reused, even after its event is deleted.
 let nextId = Math.max(0, ...events.map((e) => e.id)) + 1;
-
-const MAX_NAME_LENGTH = 100;
-const MAX_SEATS = 100_000;
 
 // Exactly one browser origin may read responses (CORS). Anything else gets no
 // CORS headers, so the browser, not the server, blocks it.
@@ -118,35 +117,10 @@ function sendEvent(req: IncomingMessage, res: ServerResponse, event: EventItem):
   sendJson(res, 200, event, headers);
 }
 
-type Validation =
-  | { ok: true; value: Omit<EventItem, "id"> }
-  | { ok: false; details: string[] };
-
-function validateNewEvent(input: unknown): Validation {
-  if (typeof input !== "object" || input === null || Array.isArray(input)) {
-    return { ok: false, details: ["body must be a JSON object"] };
-  }
-  const { name, seats } = input as Record<string, unknown>;
-  const details: string[] = [];
-
-  const trimmed = typeof name === "string" ? name.trim() : "";
-  if (typeof name !== "string") {
-    details.push("name must be a string");
-  } else if (trimmed.length === 0 || trimmed.length > MAX_NAME_LENGTH) {
-    details.push(`name must be 1-${MAX_NAME_LENGTH} characters after trimming`);
-  }
-
-  if (
-    typeof seats !== "number" ||
-    !Number.isInteger(seats) ||
-    seats < 0 ||
-    seats > MAX_SEATS
-  ) {
-    details.push(`seats must be an integer between 0 and ${MAX_SEATS}`);
-  }
-
-  if (details.length > 0) return { ok: false, details };
-  return { ok: true, value: { name: trimmed, seats: seats as number } };
+// 422: valid JSON that violates the contract. `details` is the legacy message
+// list (kept for compatibility); `errors` adds stable field paths and codes.
+function unprocessable(res: ServerResponse, errors: FieldError[]): void {
+  sendJson(res, 422, { error: "Unprocessable Content", details: detailsOf(errors), errors });
 }
 
 // The request body is ignored (DELETE, or PUT on a missing event). If one was
@@ -292,11 +266,8 @@ async function createEvent(
   if (!body) return;
 
   // Validate fully before touching the store: invalid input never mutates.
-  const result = validateNewEvent(body.value);
-  if (!result.ok) {
-    sendJson(res, 422, { error: "Unprocessable Content", details: result.details });
-    return;
-  }
+  const result = validateEventInput(body.value);
+  if (!result.ok) return unprocessable(res, result.errors);
 
   const event: EventItem = { id: nextId++, ...result.value };
   events.push(event);
@@ -322,11 +293,8 @@ async function replaceEvent(
   const body = await readJson(req, res);
   if (!body) return;
 
-  const result = validateNewEvent(body.value);
-  if (!result.ok) {
-    sendJson(res, 422, { error: "Unprocessable Content", details: result.details });
-    return;
-  }
+  const result = validateEventInput(body.value);
+  if (!result.ok) return unprocessable(res, result.errors);
 
   // Look the event up again: the store may have changed while the body was read.
   const index = events.findIndex((e) => e.id === id);
@@ -356,55 +324,34 @@ function deleteEvent(id: number, req: IncomingMessage, res: ServerResponse): voi
 
 // ---------- v1-only handlers (stubs and mock data, lecture 06) ----------
 
-const PAGE_SIZE = 10;
-const SORT_FIELDS = ["id", "name", "seats"] as const;
-type SortField = (typeof SORT_FIELDS)[number];
-
-function badQuery(res: ServerResponse, details: string[]): void {
-  sendJson(res, 400, { error: "Bad Request", details });
+function badQuery(res: ServerResponse, errors: FieldError[]): void {
+  sendJson(res, 400, { error: "Bad Request", details: detailsOf(errors), errors });
 }
 
-// Query policy: city, sort and page are scalar (a repeated key is a 400); sort
-// is "id|name|seats" with an optional "-" for descending; page is a positive
-// integer. Unknown keys are ignored. Events have no city, so city is accepted
-// and echoed back but does not filter (deliberate simplification).
+// Query policy (validation.ts): city, sort and page are scalar (a repeated key
+// is a 400); sort is "id|name|seats" with an optional "-" for descending; page
+// is a positive integer of at most 9 digits. Unknown keys are ignored. Events
+// have no city, so city is accepted and echoed back but does not filter
+// (deliberate simplification).
 function listEventsV1(_req: IncomingMessage, res: ServerResponse, ctx: RouteContext): void {
-  const city = scalar(ctx.query, "city");
-  const sort = scalar(ctx.query, "sort");
-  const page = scalar(ctx.query, "page");
-  const details: string[] = [];
-  if (!city.ok) details.push("city must not be repeated");
-  if (!sort.ok) details.push("sort must not be repeated");
-  if (!page.ok) details.push("page must not be repeated");
-
-  const sortText = sort.ok ? (sort.value ?? "id") : "id";
-  const sortMatch = /^(-?)(id|name|seats)$/.exec(sortText);
-  if (sort.ok && !sortMatch) details.push("sort must be id, name or seats, optionally prefixed with -");
-
-  const pageText = page.ok ? (page.value ?? "1") : "1";
-  if (page.ok && !/^[1-9][0-9]{0,8}$/.test(pageText)) details.push("page must be a positive integer");
-
-  if (details.length > 0 || !sortMatch) return badQuery(res, details);
-
-  const field = sortMatch[2] as SortField;
-  const direction = sortMatch[1] === "-" ? -1 : 1;
+  const q = parseListQuery(ctx.query);
+  if (!q.ok) return badQuery(res, q.errors);
+  const { city, sort, page, offset } = q.value;
   const sorted = [...events].sort((a, b) => {
-    const x = a[field];
-    const y = b[field];
-    return (x < y ? -1 : x > y ? 1 : 0) * direction;
+    const x = a[sort.field];
+    const y = b[sort.field];
+    return (x < y ? -1 : x > y ? 1 : 0) * sort.direction;
   });
-  const pageNumber = Number(pageText);
-  const data = sorted.slice((pageNumber - 1) * PAGE_SIZE, pageNumber * PAGE_SIZE);
   sendJson(res, 200, {
-    data,
-    meta: { page: pageNumber, pageSize: PAGE_SIZE, total: events.length, sort: sortText, city: city.ok ? (city.value ?? null) : null },
+    data: sorted.slice(offset, offset + PAGE_SIZE),
+    meta: { page, pageSize: PAGE_SIZE, total: events.length, sort: sort.text, city },
   });
 }
 
 // Mock search: case-insensitive substring match on the name; no q returns all.
 function searchEventsV1(_req: IncomingMessage, res: ServerResponse, ctx: RouteContext): void {
   const q = scalar(ctx.query, "q");
-  if (!q.ok) return badQuery(res, ["q must not be repeated"]);
+  if (!q.ok) return badQuery(res, [{ path: "q", code: "REPEATED", message: "q must not be repeated" }]);
   const needle = (q.value ?? "").toLowerCase();
   sendJson(res, 200, {
     data: events.filter((e) => e.name.toLowerCase().includes(needle)),
@@ -414,7 +361,7 @@ function searchEventsV1(_req: IncomingMessage, res: ServerResponse, ctx: RouteCo
 
 // Synthetic tickets derived from the event; nothing is reserved or stored.
 function listTickets(_req: IncomingMessage, res: ServerResponse, ctx: RouteContext): void {
-  const id = Number(ctx.params["id"]);
+  const id = idOf(ctx);
   const event = events.find((e) => e.id === id);
   if (!event) return sendJson(res, 404, { error: "Not Found" });
   const tickets = Array.from({ length: Math.min(event.seats, 3) }, (_, i) => ({
@@ -442,23 +389,12 @@ async function patchEvent(id: number, req: IncomingMessage, res: ServerResponse)
 
   const body = await readJson(req, res);
   if (!body) return;
-  const v = body.value;
-  if (typeof v !== "object" || v === null || Array.isArray(v) || !("name" in v || "seats" in v)) {
-    return sendJson(res, 422, {
-      error: "Unprocessable Content",
-      details: ["body must be a JSON object with name and/or seats"],
-    });
-  }
-  const { name, seats } = v as Record<string, unknown>;
   // Merge into the event as it is NOW, not as it was before the body arrived:
   // another request may have changed it while we waited (no lost update).
   const current = events.find((e) => e.id === id);
   if (!current) return sendJson(res, 404, { error: "Not Found" });
-  const result = validateNewEvent({
-    name: name === undefined ? current.name : name,
-    seats: seats === undefined ? current.seats : seats,
-  });
-  if (!result.ok) return sendJson(res, 422, { error: "Unprocessable Content", details: result.details });
+  const result = validateEventPatch(body.value, current);
+  if (!result.ok) return unprocessable(res, result.errors);
 
   const index = events.findIndex((e) => e.id === id);
   if (index === -1) return sendJson(res, 404, { error: "Not Found" });
@@ -482,7 +418,9 @@ type AppHandler = (req: IncomingMessage, res: ServerResponse, ctx: RouteContext)
 const ID = { id: /^[1-9][0-9]*$/ };
 
 const optionsHandler: AppHandler = (req, res, ctx) => handleOptions(req, res, ctx.allow);
-const idOf = (ctx: RouteContext): number => Number(ctx.params["id"]);
+// Router guarantees the digit shape; parseId adds the safe-integer check. An
+// unrepresentable id maps to -1, which no event has, so handlers answer 404.
+const idOf = (ctx: RouteContext): number => parseId(ctx.params["id"]) ?? -1;
 
 // The event routes of lecture 05. `v1` adds the lecture 06 extras; the legacy
 // unversioned table stays exactly as lecture 05 clients know it.
