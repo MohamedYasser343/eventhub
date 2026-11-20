@@ -4,7 +4,7 @@
 - Playlist position: 11, corroborated by transcript-derived course notes (123:34).
 - Date: 2026-11-20.
 - Learning status: complete (owner explicitly requested GitHub update following the lesson).
-- Implementation status: awaiting learner review (implemented 2026-11-20; owner confirmation pending).
+- Implementation status: complete (owner confirmed 2026-11-20).
 - Sources: third-party copy of YouTube auto-captions and timestamped lecture notes; original video and playlist order were not independently replayed. ASR may contain errors. The examples using EventHub, HTTP specification corrections and production extensions below are supplementary.
 
 ## Learning objectives
@@ -186,4 +186,4 @@ Limitations: the id tie-break is correct by construction, but since ids are mono
 - [x] Implementation or reproducible experiment.
 - [x] Acceptance criteria demonstrated (see above).
 - [x] Negative cases and regression checks.
-- [ ] Implementation progress confirmed by learner (pending owner confirmation).
+- [x] Implementation progress confirmed by learner (2026-11-20).

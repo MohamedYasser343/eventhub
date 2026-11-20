@@ -6,7 +6,7 @@ Last updated: 2026-11-20.
 - Repository initialization: documentation foundations prepared.
 - Learning: lectures 05–11 complete (05–06 confirmed 2026-11-16; 07–08 confirmed 2026-11-19; 09–11 confirmed 2026-11-20); reference notes for 01–04 prepared, completion not confirmed.
 - Implementation: lecture 10 complete (owner confirmed 2026-11-20). Lecture 05 complete (owner confirmed 2026-11-18; endpoints, CORS, ETag and experiments demonstrated; optional gzip deferred; ADR-001 to ADR-004).
-- Next learning milestone: playlist position 12 (provisional: Database; verify actual video title and scope). Lecture 11 implementation (REST API design) done and awaiting owner confirmation; next implementation milestone after approval: lecture 12.
+- Next learning milestone: playlist position 12 (provisional: Database; verify actual video title and scope). Lecture 11 implementation complete (owner confirmed 2026-11-20; ADR-010). Next implementation milestone: lecture 12 (needs owner approval).
 - Implementation: lecture 06 complete (owner confirmed 2026-11-18; router, v1 routes, collision experiment, edge cases; ADR-005).
 - Implementation: lectures 07 and 08 complete (owner confirmed 2026-11-19; ADR-006, ADR-007). Lecture 09 complete (owner confirmed 2026-11-20; ADR-008) on branch `feat/lecture-09-validation`, PR #5.
 - Backend language: Node/TypeScript, native `node:http`, `tsx` dev runner ([ADR-001](decisions/001-backend-language-and-tooling.md)).
@@ -28,7 +28,7 @@ Track learning and implementation independently. Status values: not started, in 
 | 8 | Complete | Complete | [Authentication and authorization](lectures/08-authentication-authorization.md), 2026-11-19; stale JWT claims and revocation trade-offs discussed; full transcript not reviewed. | [Evidence](lectures/08-authentication-authorization.md#implementation-evidence-coding-agent-complete) |
 | 9 | Complete | Complete | [Validation & Transformation](lectures/09-validation-transformation.md), 2026-11-20; source-of-truth and stale price discussion recorded; full transcript not independently reverified. | [Evidence](lectures/09-validation-transformation.md#implementation-evidence-coding-agent-complete) |
 | 10 | Complete | Complete | [What are controllers, services, repositories, middlewares and request context?](lectures/10-application-layers.md), 2026-11-20; cancellation authorization discussion recorded; original transcript not directly reviewed. | [Evidence](lectures/10-application-layers.md#implementation-evidence-coding-agent) |
-| 11 | Complete | Awaiting learner review | [Complete REST API Design](lectures/11-rest-api-design.md), 2026-11-20; third-party transcript/notes reviewed; PATCH idempotency clarification; no open learner questions recorded. | [Evidence](lectures/11-rest-api-design.md#implementation-evidence-coding-agent), ADR-010 |
+| 11 | Complete | Complete | [Complete REST API Design](lectures/11-rest-api-design.md), 2026-11-20; third-party transcript/notes reviewed; PATCH idempotency clarification; no open learner questions recorded. | [Evidence](lectures/11-rest-api-design.md#implementation-evidence-coding-agent), ADR-010 |
 | 12 | Not started | Not started | — | — |
 | 13 | Not started | Not started | — | — |
 | 14 | Not started | Not started | — | — |
