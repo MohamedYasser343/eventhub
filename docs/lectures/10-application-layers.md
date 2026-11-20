@@ -5,7 +5,7 @@
 - Playlist position: 10 (identified in the session via lecture-specific notes and the existing roadmap; live playlist listing not independently checked).
 - Date: 2026-11-20
 - Learning status: Complete (owner explicitly confirmed).
-- Implementation status: Not started.
+- Implementation status: Awaiting learner review (implemented 2026-11-20, owner confirmation pending).
 - Source availability: [lecture-specific third-party transcript-derived notes](https://github.com/shubhamscifi/backend_from_first_principles_notes/blob/main/10_controllers_services_repositories/NOTES.md) identify the title, URL and scope (59:57). The original recording/transcript was not directly reviewed. The core topics are the internal request lifecycle, controller/service/repository separation, middleware and request context. EventHub examples, dependency injection, testing advice, and production qualifications are supplemental mentor explanations, not a verbatim account.
 
 ## Learning objectives
@@ -229,11 +229,37 @@ Common misconceptions: layers are not mandatory; a service can contain ordinary 
 - [x] Conceptual notes, discussion and assignment documented.
 - [x] Learning progress updated independently in docs/PROGRESS.md.
 
-## Implementation evidence (coding agent; initially pending)
+## Implementation evidence (coding agent)
 
-No code changes, tests or benchmark runs are represented by this documentation update. Append actual evidence and update implementation progress independently.
+Environment: Node via `tsx`, branch `feat/lecture-10-application-layers`, 2026-11-20. Baseline before changes: `npm test` 166/166, `npm run typecheck` clean. No benchmarks; layering was not measured for speed.
 
-- [ ] Implementation or reproducible experiment.
-- [ ] Acceptance criteria demonstrated.
-- [ ] Negative cases and regression checks.
-- [ ] Implementation progress updated and learner confirmed.
+**What changed** ([ADR-009](../decisions/009-application-layers-and-request-pipeline.md), proposed):
+- `backend/src/modules/events/{repository,service}.ts`: storage contract + in-memory adapter; `EventService` (list/get/search/create/replace/patch/remove, ownership and role rules, typed outcomes, no HTTP).
+- `backend/src/http/middleware.ts` (`compose`), `backend/src/http/context.ts` (`RequestContext`, request id).
+- `backend/src/server.ts`: controllers map service outcomes to statuses; `requireAuth` is now route middleware (`protect(...)`); global pipeline `observe → cors → errorBoundary → router`; dependencies wired in `server.ts`.
+- `backend/src/modules/bookings/cancellation-policy.ts`: pure policy exercise (no endpoint).
+
+**Actual pipeline:** `request → context+X-Request-Id+log → CORS → error boundary → route match → requireAuth (protected routes only) → controller → EventService → repository`.
+
+**Commands and observed results:**
+- `cd backend && npm test` → tests 184, pass 184, fail 0 (166 existing unchanged + 18 new in `test/layers.test.ts`).
+- `cd backend && npm run typecheck` → clean.
+
+**Acceptance criteria → evidence** (`backend/test/layers.test.ts` unless noted):
+1. Service tested with `FakeRepo`, no server; service imports no HTTP types.
+2. Fake repository records calls: forbidden/invalid inputs never call `insert`; controller delegates to the service.
+3. Middleware order/onion trace, short-circuit (downstream count 0), double `next()` throws, downstream rejection reaches upstream catch; unauthenticated `POST`/`DELETE` give 401 and leave `events`/`eventOwners` unchanged; induced storage exception gives one safe 500 and the server stays healthy.
+4. Two organizers' requests are authenticated and held open on their bodies, completed in reverse order: different request ids, each created event is owned by its own user.
+5. Identity comes from the session: a body with `ownerId`, `role`, `id` is ignored (owner is the actor, id is fresh); invalid input never calls `insert`.
+6. Same `X-Request-Id` in the response header and the JSON log line; log contains no query string, token or `Bearer`; the 500 error message is not logged or returned.
+7. All 166 earlier tests (routing, auth 401/403, validation, serialization, CORS/HEAD/OPTIONS, 404/405) pass unchanged. Public routes verified without credentials.
+8. This section, ADR-009.
+
+**Cancellation policy** (fixed clock): owner 30 h allow; exactly 24 h allow; 23 h and 1 s short deny; non-owner deny; admin 1 h allow; cancelled/completed deny even for admin.
+
+**Limitations / deliberate simplifications:** only the events module was layered (auth, tickets, validation untouched); repository is synchronous (see ADR); abort signal exists but nothing consumes it; a client-supplied `X-Request-Id` is trusted after format validation only; LOG format changed from plain text to JSON; no trace of a real concurrent-load run.
+
+- [x] Implementation or reproducible experiment.
+- [x] Acceptance criteria demonstrated (see above).
+- [x] Negative cases and regression checks.
+- [ ] Implementation progress updated and learner confirmed (owner confirmation pending).

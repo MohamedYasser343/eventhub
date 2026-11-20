@@ -12,7 +12,7 @@ export interface User {
   role: Role;
   passwordHash: string; // never leaves this module's callers: see publicUser()
 }
-export const publicUser = (u: User) => ({ id: u.id, username: u.username, role: u.role });
+export const publicUser = (u: Pick<User, "id" | "username" | "role">) => ({ id: u.id, username: u.username, role: u.role });
 
 // ---------- password hashing (node:crypto scrypt, per-user random salt) ----------
 const SCRYPT = { N: 16384, r: 8, p: 1, keylen: 32 };
