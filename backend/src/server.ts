@@ -8,13 +8,16 @@ import type { FieldError } from "./validation.ts";
 import type { Query, Registrar } from "./router.ts";
 import { readJsonBody } from "./json.ts";
 import { auth, eventOwners, publicUser, ticketsByUser } from "./auth.ts";
-import type { User } from "./auth.ts";
+import { createRequestContext } from "./http/context.ts";
+import type { RequestContext } from "./http/context.ts";
+import { compose } from "./http/middleware.ts";
+import type { Middleware } from "./http/middleware.ts";
+import { InMemoryEventRepository } from "./modules/events/repository.ts";
+import type { EventItem } from "./modules/events/repository.ts";
+import { EventService } from "./modules/events/service.ts";
+import type { EventError, Outcome } from "./modules/events/service.ts";
 
-export interface EventItem {
-  id: number;
-  name: string;
-  seats: number;
-}
+export type { EventItem };
 
 // In-memory store with synthetic data. State resets on restart.
 export const events: EventItem[] = [
@@ -22,8 +25,9 @@ export const events: EventItem[] = [
   { id: 2, name: "Synthetic Tech Meetup", seats: 80 },
 ];
 
-// Monotonic counter: an id is never reused, even after its event is deleted.
-let nextId = Math.max(0, ...events.map((e) => e.id)) + 1;
+// Composition root (lecture 10): dependencies are wired by hand, here, once.
+// Handlers talk to the service; only the repository touches the store.
+const eventService = new EventService(new InMemoryEventRepository(events, eventOwners));
 
 // Exactly one browser origin may read responses (CORS). Anything else gets no
 // CORS headers, so the browser, not the server, blocks it.
@@ -155,24 +159,45 @@ function bearerToken(req: IncomingMessage): string | null {
   return m?.[1] ?? null;
 }
 
-// 401 when no valid session; the unread body is not drained (see ignoredBodyHeaders).
-function requireUser(req: IncomingMessage, res: ServerResponse): { user: User; token: string } | null {
+// Route middleware: 401 unless the request carries a valid session. On success the
+// VERIFIED identity is stored on this request's context; nothing downstream reads
+// identity from the client. A rejection never calls next(), so the handler (and
+// any service or storage behind it) is not invoked. The unread body is not drained
+// (see ignoredBodyHeaders).
+const requireAuth: Middleware<RouteContext> = async (req, res, ctx, next) => {
   const token = bearerToken(req);
   const user = token ? auth.authenticate(token) : null;
   if (!token || !user) {
     const challenge = req.headers.authorization === undefined ? "Bearer" : 'Bearer error="invalid_token"';
     sendJson(res, 401, { error: "Unauthorized" }, { "WWW-Authenticate": challenge, ...ignoredBodyHeaders(req) });
-    return null;
+    return;
   }
-  return { user, token };
-}
+  ctx.user = { id: user.id, username: user.username, role: user.role };
+  ctx.token = token;
+  await next();
+};
+
+type Authed = RouteContext & { user: NonNullable<RequestContext["user"]>; token: string };
+type AuthedHandler = (req: IncomingMessage, res: ServerResponse, ctx: Authed) => void | Promise<void>;
+// Marks a route as protected: requireAuth runs first, then the handler.
+const protect = (h: AuthedHandler): AppHandler =>
+  compose<RouteContext>([requireAuth], (req, res, ctx) => h(req, res, ctx as Authed));
 
 function forbidden(req: IncomingMessage, res: ServerResponse): void {
   sendJson(res, 403, { error: "Forbidden" }, ignoredBodyHeaders(req));
 }
 
-const canEdit = (user: User, eventId: number) =>
-  user.role === "admin" || (user.role === "organizer" && eventOwners.get(eventId) === user.id);
+// Controller side of EventError: the only place domain failures become statuses.
+function sendEventError(req: IncomingMessage, res: ServerResponse, error: EventError): void {
+  switch (error.kind) {
+    case "not-found":
+      return sendJson(res, 404, { error: "Not Found" }, ignoredBodyHeaders(req));
+    case "forbidden":
+      return forbidden(req, res);
+    case "invalid":
+      return unprocessable(res, error.errors);
+  }
+}
 
 const USERNAME = /^[A-Za-z0-9_]{3,32}$/;
 const MIN_PASSWORD = 12;
@@ -226,98 +251,60 @@ async function login(req: IncomingMessage, res: ServerResponse): Promise<void> {
   }, NO_STORE);
 }
 
-function logout(req: IncomingMessage, res: ServerResponse): void {
-  const a = requireUser(req, res);
-  if (!a) return;
-  auth.destroySession(a.token); // server-side revocation: the old token is dead immediately
+function logout(_req: IncomingMessage, res: ServerResponse, ctx: Authed): void {
+  auth.destroySession(ctx.token); // server-side revocation: the old token is dead immediately
   res.writeHead(204, NO_STORE);
   res.end();
 }
 
-function me(req: IncomingMessage, res: ServerResponse): void {
-  const a = requireUser(req, res);
-  if (a) sendJson(res, 200, publicUser(a.user), NO_STORE);
+function me(_req: IncomingMessage, res: ServerResponse, ctx: Authed): void {
+  sendJson(res, 200, publicUser(ctx.user), NO_STORE);
 }
 
 // Own tickets only: the caller comes from the session, never from the URL or query.
-function myTickets(req: IncomingMessage, res: ServerResponse): void {
-  const a = requireUser(req, res);
-  if (a) sendJson(res, 200, { data: ticketsByUser.get(a.user.id) ?? [] }, NO_STORE);
+function myTickets(_req: IncomingMessage, res: ServerResponse, ctx: Authed): void {
+  sendJson(res, 200, { data: ticketsByUser.get(ctx.user.id) ?? [] }, NO_STORE);
 }
 
 // Object-level check by id: someone else's ticket is indistinguishable from a missing one (404).
-function ticketById(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): void {
-  const a = requireUser(req, res);
-  if (!a) return;
-  const ticket = (ticketsByUser.get(a.user.id) ?? []).find((t) => t.ticketId === ctx.params["id"]);
+function ticketById(_req: IncomingMessage, res: ServerResponse, ctx: Authed): void {
+  const ticket = (ticketsByUser.get(ctx.user.id) ?? []).find((t) => t.ticketId === ctx.params["id"]);
   if (!ticket) return sendJson(res, 404, { error: "Not Found" }, NO_STORE);
   sendJson(res, 200, ticket, NO_STORE);
 }
 
-async function createEvent(
-  req: IncomingMessage,
-  res: ServerResponse,
-  prefix: string,
-): Promise<void> {
-  const a = requireUser(req, res);
-  if (!a) return;
-  if (a.user.role !== "organizer" && a.user.role !== "admin") return forbidden(req, res);
+async function createEvent(req: IncomingMessage, res: ServerResponse, ctx: Authed): Promise<void> {
+  // Role is checked before the body is read, as before; the service re-checks.
+  if (!eventService.canCreate(ctx.user)) return forbidden(req, res);
   const body = await readJson(req, res);
   if (!body) return;
-
-  // Validate fully before touching the store: invalid input never mutates.
-  const result = validateEventInput(body.value);
-  if (!result.ok) return unprocessable(res, result.errors);
-
-  const event: EventItem = { id: nextId++, ...result.value };
-  events.push(event);
-  eventOwners.set(event.id, a.user.id);
-  sendJson(res, 201, event, { Location: `${prefix}/events/${event.id}` });
+  const r = eventService.create(ctx.user, body.value);
+  if (!r.ok) return sendEventError(req, res, r.error);
+  sendJson(res, 201, r.value, { Location: `${ctx.prefix}/events/${r.value.id}` });
 }
 
-// PUT replaces the whole event (name and seats required). The id comes from the
-// URL; an `id` in the body is ignored. Existence is checked before the body.
-async function replaceEvent(
-  id: number,
+// Shared by PUT and PATCH. Existence (404) and permission (403) are decided before
+// the body is read; the service re-checks against the store as it is after the
+// body arrives, so a concurrent delete or change is still handled.
+async function modifyEvent(
+  op: "replace" | "patch",
   req: IncomingMessage,
   res: ServerResponse,
+  ctx: Authed,
 ): Promise<void> {
-  const a = requireUser(req, res);
-  if (!a) return;
-  if (!events.some((e) => e.id === id)) {
-    sendJson(res, 404, { error: "Not Found" }, ignoredBodyHeaders(req));
-    return;
-  }
-  if (!canEdit(a.user, id)) return forbidden(req, res);
-
+  const id = idOf(ctx);
+  const pre = eventService.authorizeEdit(ctx.user, id);
+  if (!pre.ok) return sendEventError(req, res, pre.error);
   const body = await readJson(req, res);
   if (!body) return;
-
-  const result = validateEventInput(body.value);
-  if (!result.ok) return unprocessable(res, result.errors);
-
-  // Look the event up again: the store may have changed while the body was read.
-  const index = events.findIndex((e) => e.id === id);
-  if (index === -1) {
-    sendJson(res, 404, { error: "Not Found" });
-    return;
-  }
-  const event: EventItem = { id, ...result.value };
-  events[index] = event;
-  sendJson(res, 200, event);
+  const r: Outcome<EventItem> = eventService[op](ctx.user, id, body.value);
+  if (!r.ok) return sendEventError(req, res, r.error);
+  sendJson(res, 200, r.value);
 }
 
-function deleteEvent(id: number, req: IncomingMessage, res: ServerResponse): void {
-  const a = requireUser(req, res);
-  if (!a) return;
-  const index = events.findIndex((e) => e.id === id);
-  if (index === -1) {
-    sendJson(res, 404, { error: "Not Found" }, ignoredBodyHeaders(req));
-    return;
-  }
-  if (a.user.role !== "admin") return forbidden(req, res);
-  events.splice(index, 1);
-  eventOwners.delete(id);
+function deleteEvent(req: IncomingMessage, res: ServerResponse, ctx: Authed): void {
+  const r = eventService.remove(ctx.user, idOf(ctx));
+  if (!r.ok) return sendEventError(req, res, r.error);
   res.writeHead(204, ignoredBodyHeaders(req));
   res.end();
 }
@@ -337,14 +324,15 @@ function listEventsV1(_req: IncomingMessage, res: ServerResponse, ctx: RouteCont
   const q = parseListQuery(ctx.query);
   if (!q.ok) return badQuery(res, q.errors);
   const { city, sort, page, offset } = q.value;
-  const sorted = [...events].sort((a, b) => {
+  const all = eventService.list();
+  const sorted = [...all].sort((a, b) => {
     const x = a[sort.field];
     const y = b[sort.field];
     return (x < y ? -1 : x > y ? 1 : 0) * sort.direction;
   });
   sendJson(res, 200, {
     data: sorted.slice(offset, offset + PAGE_SIZE),
-    meta: { page, pageSize: PAGE_SIZE, total: events.length, sort: sort.text, city },
+    meta: { page, pageSize: PAGE_SIZE, total: all.length, sort: sort.text, city },
   });
 }
 
@@ -352,9 +340,8 @@ function listEventsV1(_req: IncomingMessage, res: ServerResponse, ctx: RouteCont
 function searchEventsV1(_req: IncomingMessage, res: ServerResponse, ctx: RouteContext): void {
   const q = scalar(ctx.query, "q");
   if (!q.ok) return badQuery(res, [{ path: "q", code: "REPEATED", message: "q must not be repeated" }]);
-  const needle = (q.value ?? "").toLowerCase();
   sendJson(res, 200, {
-    data: events.filter((e) => e.name.toLowerCase().includes(needle)),
+    data: eventService.search(q.value ?? ""),
     meta: { q: q.value ?? null },
   });
 }
@@ -362,7 +349,7 @@ function searchEventsV1(_req: IncomingMessage, res: ServerResponse, ctx: RouteCo
 // Synthetic tickets derived from the event; nothing is reserved or stored.
 function listTickets(_req: IncomingMessage, res: ServerResponse, ctx: RouteContext): void {
   const id = idOf(ctx);
-  const event = events.find((e) => e.id === id);
+  const event = eventService.get(id);
   if (!event) return sendJson(res, 404, { error: "Not Found" });
   const tickets = Array.from({ length: Math.min(event.seats, 3) }, (_, i) => ({
     ticketId: `T-${id}-${i + 1}`,
@@ -377,35 +364,9 @@ function bookingStub(req: IncomingMessage, res: ServerResponse): void {
   sendJson(res, 501, { error: "Not Implemented", detail: "booking is a stub" }, ignoredBodyHeaders(req));
 }
 
-// PATCH changes only the fields sent (name and/or seats); the merged result is
-// validated like a full event, and nothing is stored if it is invalid.
-async function patchEvent(id: number, req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const a = requireUser(req, res);
-  if (!a) return;
-  if (!events.some((e) => e.id === id)) {
-    return sendJson(res, 404, { error: "Not Found" }, ignoredBodyHeaders(req));
-  }
-  if (!canEdit(a.user, id)) return forbidden(req, res);
-
-  const body = await readJson(req, res);
-  if (!body) return;
-  // Merge into the event as it is NOW, not as it was before the body arrived:
-  // another request may have changed it while we waited (no lost update).
-  const current = events.find((e) => e.id === id);
-  if (!current) return sendJson(res, 404, { error: "Not Found" });
-  const result = validateEventPatch(body.value, current);
-  if (!result.ok) return unprocessable(res, result.errors);
-
-  const index = events.findIndex((e) => e.id === id);
-  if (index === -1) return sendJson(res, 404, { error: "Not Found" });
-  const event: EventItem = { id, ...result.value };
-  events[index] = event;
-  sendJson(res, 200, event);
-}
-
 // ---------- route table ----------
 
-export interface RouteContext {
+export interface RouteContext extends RequestContext {
   params: Record<string, string>;
   query: Query;
   allow: string;
@@ -432,19 +393,19 @@ function registerEventRoutes(r: Registrar<AppHandler>, v1: boolean): void {
     r.add("GET", "/events/search", searchEventsV1);
     r.add("OPTIONS", "/events/search", optionsHandler);
   } else {
-    r.add("GET", "/events", (_req, res) => sendJson(res, 200, events));
+    r.add("GET", "/events", (_req, res) => sendJson(res, 200, eventService.list()));
   }
-  r.add("POST", "/events", (req, res, ctx) => createEvent(req, res, ctx.prefix));
+  r.add("POST", "/events", protect(createEvent));
   r.add("OPTIONS", "/events", optionsHandler);
 
   r.add("GET", "/events/:id", (req, res, ctx) => {
-    const event = events.find((e) => e.id === idOf(ctx));
+    const event = eventService.get(idOf(ctx));
     if (event) sendEvent(req, res, event);
     else sendJson(res, 404, { error: "Not Found" });
   }, ID);
-  r.add("PUT", "/events/:id", (req, res, ctx) => replaceEvent(idOf(ctx), req, res), ID);
-  if (v1) r.add("PATCH", "/events/:id", (req, res, ctx) => patchEvent(idOf(ctx), req, res), ID);
-  r.add("DELETE", "/events/:id", (req, res, ctx) => deleteEvent(idOf(ctx), req, res), ID);
+  r.add("PUT", "/events/:id", protect((req, res, ctx) => modifyEvent("replace", req, res, ctx)), ID);
+  if (v1) r.add("PATCH", "/events/:id", protect((req, res, ctx) => modifyEvent("patch", req, res, ctx)), ID);
+  r.add("DELETE", "/events/:id", protect(deleteEvent), ID);
   r.add("OPTIONS", "/events/:id", optionsHandler, ID);
 
   if (v1) {
@@ -454,13 +415,13 @@ function registerEventRoutes(r: Registrar<AppHandler>, v1: boolean): void {
     r.add("OPTIONS", "/auth/register", optionsHandler);
     r.add("POST", "/auth/login", login);
     r.add("OPTIONS", "/auth/login", optionsHandler);
-    r.add("POST", "/auth/logout", logout);
+    r.add("POST", "/auth/logout", protect(logout));
     r.add("OPTIONS", "/auth/logout", optionsHandler);
-    r.add("GET", "/auth/me", me);
+    r.add("GET", "/auth/me", protect(me));
     r.add("OPTIONS", "/auth/me", optionsHandler);
-    r.add("GET", "/me/tickets", myTickets);
+    r.add("GET", "/me/tickets", protect(myTickets));
     r.add("OPTIONS", "/me/tickets", optionsHandler);
-    r.add("GET", "/tickets/:id", ticketById);
+    r.add("GET", "/tickets/:id", protect(ticketById));
     r.add("OPTIONS", "/tickets/:id", optionsHandler);
     r.add("POST", "/bookings", bookingStub);
     r.add("OPTIONS", "/bookings", optionsHandler);
@@ -472,7 +433,58 @@ router.add("GET", "/health", (_req, res) => sendJson(res, 200, { status: "ok" })
 registerEventRoutes(router, false); // legacy, unversioned (kept for lecture 05 clients)
 registerEventRoutes(router.group("/api/v1"), true); // "/api/v2" is not implemented: 404
 
-async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+// ---------- request pipeline (lecture 10) ----------
+//
+//   request -> [context + request id + log] -> [cors] -> [error boundary]
+//           -> route match -> [route middleware, e.g. requireAuth] -> handler
+//           -> service -> repository
+//
+// Global middleware runs for every request, including 404/405. Route middleware
+// runs only for the matched route, so public routes stay public.
+
+// One JSON line per finished request; null disables. Never logs the query string,
+// headers (Authorization), or bodies: only ids, method, path, status, timing.
+export const logSink: { write: ((line: string) => void) | null } = {
+  write: process.env.LOG_REQUESTS === "1" ? (line) => console.log(line) : null,
+};
+
+const observe: Middleware<RouteContext> = async (req, res, ctx, next) => {
+  res.setHeader("X-Request-Id", ctx.requestId); // on every response, set before anything can reply
+  res.on("finish", () => {
+    logSink.write?.(
+      JSON.stringify({
+        requestId: ctx.requestId,
+        method: req.method,
+        path: new URL(req.url?.startsWith("/") ? `http://x${req.url}` : "http://x/", "http://x").pathname,
+        status: res.statusCode,
+        durationMs: Date.now() - ctx.startedAt,
+        userId: ctx.user?.id ?? null,
+      }),
+    );
+  });
+  await next();
+};
+
+const cors: Middleware<RouteContext> = async (req, res, _ctx, next) => {
+  applyCors(req, res);
+  await next();
+};
+
+// Wraps everything downstream: a throw or rejection becomes one safe 500 (no stack,
+// no message), or just ends the response if headers were already sent.
+const errorBoundary: Middleware<RouteContext> = async (_req, res, ctx, next) => {
+  try {
+    await next();
+  } catch (err) {
+    logSink.write?.(
+      JSON.stringify({ requestId: ctx.requestId, level: "error", error: err instanceof Error ? err.name : "unknown" }),
+    );
+    if (!res.headersSent) sendJson(res, 500, { error: "Internal Server Error" });
+    else if (!res.writableEnded) res.end();
+  }
+};
+
+function dispatch(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> | void {
   // Origin-form targets start with "/". Parse them against a fixed host so a
   // leading "//" stays part of the path (404) instead of being read as a host,
   // which would make "//x/events" an extra URL for /events. Other forms, such
@@ -482,45 +494,36 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     target.startsWith("/") ? `http://localhost${target}` : target,
     "http://localhost",
   );
-  applyCors(req, res);
 
   const result = router.match(req.method ?? "GET", url.pathname);
   switch (result.kind) {
     case "match":
-      await result.handler(req, res, {
-        params: result.params,
-        query: parseQuery(url.searchParams),
-        allow: result.allow,
-        prefix: result.prefix,
-      });
-      return;
+      ctx.params = result.params;
+      ctx.query = parseQuery(url.searchParams);
+      ctx.allow = result.allow;
+      ctx.prefix = result.prefix;
+      return result.handler(req, res, ctx);
     case "method-not-allowed":
-      methodNotAllowed(res, result.allow);
-      return;
+      return methodNotAllowed(res, result.allow);
     case "bad-request":
-      sendJson(res, 400, { error: "Bad Request" });
-      return;
+      return sendJson(res, 400, { error: "Bad Request" });
     case "not-found":
-      sendJson(res, 404, { error: "Not Found" });
-      return;
+      return sendJson(res, 404, { error: "Not Found" });
   }
 }
 
+const pipeline = compose<RouteContext>([observe, cors, errorBoundary], dispatch);
+
 export const server = createServer((req, res) => {
-  if (process.env.LOG_REQUESTS === "1") {
-    res.on("finish", () => {
-      console.log(
-        `${req.method} ${req.url} origin=${req.headers.origin ?? "-"} -> ${res.statusCode}`,
-      );
-    });
-  }
-  handle(req, res).catch(() => {
-    if (!res.headersSent) {
-      sendJson(res, 500, { error: "Internal Server Error" });
-    } else {
-      res.end();
-    }
-  });
+  const ctx: RouteContext = {
+    ...createRequestContext(req, res),
+    params: {},
+    query: Object.create(null) as Query,
+    allow: "",
+    prefix: "",
+  };
+  // errorBoundary handles handler errors; this catch is only a last resort.
+  pipeline(req, res, ctx).catch(() => res.destroy());
 });
 
 const isMain = process.argv[1] === fileURLToPath(import.meta.url);

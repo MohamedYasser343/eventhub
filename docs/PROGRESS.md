@@ -5,14 +5,14 @@ Last updated: 2026-11-20.
 ## Current state
 - Repository initialization: documentation foundations prepared.
 - Learning: lectures 05–10 complete (05–06 confirmed 2026-11-16; 07–08 confirmed 2026-11-19; 09–10 confirmed 2026-11-20); reference notes for 01–04 prepared, completion not confirmed.
-- Implementation: lecture 05 complete (owner confirmed 2026-11-18; endpoints, CORS, ETag and experiments demonstrated; optional gzip deferred; ADR-001 to ADR-004).
-- Next learning milestone: playlist position 11 (provisional: REST/CRUD; verify actual video title and scope). Next implementation milestone: lecture 10 (application layers), not started.
+- Implementation: lecture 10 complete (owner confirmed 2026-11-20). Lecture 05 complete (owner confirmed 2026-11-18; endpoints, CORS, ETag and experiments demonstrated; optional gzip deferred; ADR-001 to ADR-004).
+- Next learning milestone: playlist position 11 (provisional: REST/CRUD; verify actual video title and scope). Next implementation milestone: lecture 10 (application layers) complete (owner confirmed 2026-11-20; ADR-009) on branch `feat/lecture-10-application-layers`.
 - Implementation: lecture 06 complete (owner confirmed 2026-11-18; router, v1 routes, collision experiment, edge cases; ADR-005).
 - Implementation: lectures 07 and 08 complete (owner confirmed 2026-11-19; ADR-006, ADR-007). Lecture 09 complete (owner confirmed 2026-11-20; ADR-008) on branch `feat/lecture-09-validation`, PR #5.
 - Backend language: Node/TypeScript, native `node:http`, `tsx` dev runner ([ADR-001](decisions/001-backend-language-and-tooling.md)).
 - Frontend: deferred until backend curriculum completion and explicit owner approval.
 - Lectures 07 and 08 implemented on branches `feat/lecture-07-serialization` and `feat/lecture-08-auth`, confirmed by the owner; JWT lab done (`jose` added).
-- Tests/benchmarks: `npm test` 166/166 passing and `npm run typecheck` clean; no benchmarks.
+- Tests/benchmarks: `npm test` 184/184 passing and `npm run typecheck` clean; no benchmarks.
 
 ## Milestones
 Track learning and implementation independently. Status values: not started, in progress, blocked, awaiting learner review, complete. Learning marked complete means the owner confirmed the session and its notes were documented; implementation marked complete means the assignment has demonstrated acceptance criteria and owner confirmation. Neither implies the other.
@@ -27,7 +27,7 @@ Track learning and implementation independently. Status values: not started, in 
 | 7 | Complete | Complete | [Serialization and Deserialization](lectures/07-serialization.md), 2026-11-19; process isolation, lossy JSON and performance trade-offs discussed; transcript not independently reverified during documentation. | [Evidence](lectures/07-serialization.md#implementation-evidence-coding-agent-complete) |
 | 8 | Complete | Complete | [Authentication and authorization](lectures/08-authentication-authorization.md), 2026-11-19; stale JWT claims and revocation trade-offs discussed; full transcript not reviewed. | [Evidence](lectures/08-authentication-authorization.md#implementation-evidence-coding-agent-complete) |
 | 9 | Complete | Complete | [Validation & Transformation](lectures/09-validation-transformation.md), 2026-11-20; source-of-truth and stale price discussion recorded; full transcript not independently reverified. | [Evidence](lectures/09-validation-transformation.md#implementation-evidence-coding-agent-complete) |
-| 10 | Complete | Not started | [What are controllers, services, repositories, middlewares and request context?](lectures/10-application-layers.md), 2026-11-20; cancellation authorization discussion recorded; original transcript not directly reviewed. | — |
+| 10 | Complete | Complete | [What are controllers, services, repositories, middlewares and request context?](lectures/10-application-layers.md), 2026-11-20; cancellation authorization discussion recorded; original transcript not directly reviewed. | [Evidence](lectures/10-application-layers.md#implementation-evidence-coding-agent) |
 | 11 | Not started | Not started | — | — |
 | 12 | Not started | Not started | — | — |
 | 13 | Not started | Not started | — | — |

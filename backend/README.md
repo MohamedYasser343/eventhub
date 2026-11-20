@@ -13,7 +13,7 @@ npm test           # node:test, starts its own server on a random port
 npm run typecheck  # tsc --noEmit
 ```
 
-The server listens on `127.0.0.1` only. Set `CORS_ORIGIN` to change the single browser origin allowed to read responses (default `http://localhost:3000`). Set `LOG_REQUESTS=1` to print one line per response.
+The server listens on `127.0.0.1` only. Set `CORS_ORIGIN` to change the single browser origin allowed to read responses (default `http://localhost:3000`). Set `LOG_REQUESTS=1` to print one JSON line per response (request id, method, path, status, duration, user id; never query, headers or bodies). Every response carries `X-Request-Id`.
 
 ## Endpoints
 
