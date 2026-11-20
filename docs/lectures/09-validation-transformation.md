@@ -143,7 +143,7 @@ Validate external data at boundaries; transform into explicit typed values; keep
 
 ## Implementation evidence (coding agent; awaiting learner review)
 
-Date: 2026-11-20. Environment: Linux, Node v24, `tsx`, native `node:http`, no new dependencies. Branch `feat/lecture-09-validation`. Decision: [ADR-008](../decisions/008-validation-policy.md) (proposed). Code: `backend/src/validation.ts` (new), wiring in `backend/src/server.ts`. Tests: `backend/test/validation.test.ts` (unit), `backend/test/validation-http.test.ts` (HTTP).
+Date: 2026-11-20. Environment: Linux, Node v24, `tsx`, native `node:http`, no new dependencies. Branch `feat/lecture-09-validation`. Decision: [ADR-008](../decisions/008-validation-policy.md) (accepted). Code: `backend/src/validation.ts` (new), wiring in `backend/src/server.ts`. Tests: `backend/test/validation.test.ts` (unit), `backend/test/validation-http.test.ts` (HTTP).
 
 Commands: baseline before changes `cd backend && npm test` 138/138 and `npm run typecheck` clean. After: `npm run typecheck` clean; `npm test` 166 tests, 166 pass, 0 fail (138 earlier tests unchanged and passing, 28 new). One new unit test first failed (query error order was not deterministic); the code was fixed to a fixed order, not the test. No benchmarks.
 
@@ -169,7 +169,7 @@ Commands: baseline before changes `cd backend && npm test` 138/138 and `npm run 
 - `Content-Type: text/plain` -> 415; `{bad` -> 400 `Malformed JSON`.
 
 ### Decisions needing the owner
-- ADR-008 is proposed. Confirm: additive `errors` next to `details`; legacy endpoints keep ignoring extra fields; quantity range 1-10; no `limit` parameter; UTF-16 name length.
+- ADR-008 accepted by the owner on 2026-11-20, covering: additive `errors` next to `details`; legacy endpoints keep ignoring extra fields; quantity range 1-10; no `limit` parameter; UTF-16 name length.
 - The booking pricing exercise is not wired to `POST /api/v1/bookings` (needs explicit approval).
 
 ### Not done

@@ -1,6 +1,6 @@
 # ADR-008: Request validation and transformation policy
 
-Status: Proposed (awaiting owner confirmation)
+Status: Accepted (owner confirmed all decisions, 2026-11-20)
 Date: 2026-11-20
 Related lecture: [09 — Validation & Transformation](../lectures/09-validation-transformation.md)
 

@@ -8,7 +8,7 @@ Last updated: 2026-11-20.
 - Implementation: lecture 05 complete (owner confirmed 2026-11-18; endpoints, CORS, ETag and experiments demonstrated; optional gzip deferred; ADR-001 to ADR-004).
 - Next learning milestone: playlist position 10 (provisional: Application layers; verify actual video title and scope).
 - Implementation: lecture 06 complete (owner confirmed 2026-11-18; router, v1 routes, collision experiment, edge cases; ADR-005).
-- Implementation: lectures 07 and 08 complete (owner confirmed 2026-11-19; ADR-006, ADR-007). Lecture 09 implemented on branch `feat/lecture-09-validation` (ADR-008 proposed), awaiting owner confirmation.
+- Implementation: lectures 07 and 08 complete (owner confirmed 2026-11-19; ADR-006, ADR-007). Lecture 09 implemented on branch `feat/lecture-09-validation` (ADR-008 accepted), awaiting owner confirmation.
 - Backend language: Node/TypeScript, native `node:http`, `tsx` dev runner ([ADR-001](decisions/001-backend-language-and-tooling.md)).
 - Frontend: deferred until backend curriculum completion and explicit owner approval.
 - Lectures 07 and 08 implemented on branches `feat/lecture-07-serialization` and `feat/lecture-08-auth`, confirmed by the owner; JWT lab done (`jose` added).
