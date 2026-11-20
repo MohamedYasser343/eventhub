@@ -3,6 +3,7 @@
 Status: Accepted
 Date: 2026-11-18
 Related lecture: [05 — HTTP](../lectures/05-http.md)
+Amended by: [ADR-005](005-router-and-api-versioning.md) (`Allow` is derived from registered routes; v1 adds PATCH and more OPTIONS paths), [ADR-007](007-authentication-and-authorization.md) (preflight also allows `Authorization`).
 
 ## Context
 Lecture 05 asks for HEAD and OPTIONS on `/events`, browser CORS limited to a stated test origin, and an ETag validator on one event GET. The API is meant to be called from a browser page on a different port.
@@ -22,7 +23,7 @@ Implementation choices that follow:
 - HEAD is served by the GET code path on every readable resource; Node discards the body, so status and headers (including `Content-Length`) equal GET's.
 - OPTIONS (204 + `Allow`) is answered on `/events` and `/events/:id` so preflights for POST/PUT/DELETE succeed. `/health` has no OPTIONS.
 - Every response carries `Vary: Origin`; the allowed origin additionally gets `Access-Control-Allow-Origin` and `Access-Control-Expose-Headers: Location, ETag`, so browser code can read them, also on error responses.
-- A preflight from the allowed origin gets `Allow-Methods` (that resource's list, only if the requested method is in it), `Allow-Headers: Content-Type, If-None-Match`, `Max-Age: 600`. A rejected origin or an unsupported requested method gets 204 and no approval headers.
+- A preflight from the allowed origin gets `Allow-Methods` (that resource's list, only if the requested method is in it), `Allow-Headers: Content-Type, If-None-Match` (now also `Authorization`, ADR-007), `Max-Age: 600`. A rejected origin or an unsupported requested method gets 204 and no approval headers.
 - `Allow` lists: collection `GET, HEAD, POST, OPTIONS`; item `GET, HEAD, PUT, DELETE, OPTIONS`; health `GET, HEAD`.
 
 ## Trade-offs and consequences

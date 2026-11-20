@@ -3,6 +3,7 @@
 Status: Accepted (owner confirmed sessions, 2026-11-19; JWT lab kept as an isolated comparison)
 Date: 2026-11-19
 Related lecture: [08 — Authentication and authorization](../lectures/08-authentication-authorization.md)
+Amends: [ADR-002](002-event-creation-rules.md) and [ADR-003](003-put-delete-semantics.md) (writes now require authentication and authorization; see the legacy-routes bullet), and [ADR-004](004-head-options-cors-etag.md) (preflight also allows `Authorization`).
 
 ## Decision
 - Users, sessions and ownership are in memory (`backend/src/auth.ts`); a restart forgets them. Synthetic data only.
@@ -17,5 +18,7 @@ Related lecture: [08 — Authentication and authorization](../lectures/08-authen
 ## Not production-ready
 No persistence, no shared session store, no per-IP global limiter, no HTTPS, no password reset or MFA, no session rotation on privilege change, no audit log. Duplicate registration reveals that a username exists (409), a conscious trade-off.
 
+Also deliberate: 404 before 403 on `/events/:id` lets any authenticated caller learn that an event id exists. That is acceptable only because events are public; a private resource must use concealment (404 for non-owners), as tickets already do. Revisit if events gain a draft/unpublished state.
+
 ## JWT
-Tried in an isolated lab (`backend/experiments/jwt-lab.ts`, `jose`), not used by the server: stale roles and unrevokable tokens are why sessions are proposed. Status stays Proposed until the owner confirms the method.
+Tried in an isolated lab (`backend/experiments/jwt-lab.ts`, `jose`), not used by the server: stale roles and unrevokable tokens are why sessions were chosen. The owner confirmed sessions (see Status above); the lab stays as a comparison only.

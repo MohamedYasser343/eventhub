@@ -3,6 +3,7 @@
 Status: Accepted
 Date: 2026-11-18
 Related lecture: [05 — HTTP](../lectures/05-http.md)
+Amended by: [ADR-007](007-authentication-and-authorization.md) (POST now requires an organizer or admin session), [ADR-008](008-validation-policy.md) (errors gain a `errors[]` field alongside `details`).
 
 ## Context
 Lecture 05 requires `POST /events` that rejects invalid input before mutating state, distinguishes malformed JSON, unsupported media type and semantic errors, and returns `201` with `Location`. The body is read from a stream, so an unbounded read could exhaust memory.

@@ -3,6 +3,7 @@
 Status: Accepted
 Date: 2026-11-18
 Related lecture: [05 — HTTP](../lectures/05-http.md)
+Amended by: [ADR-004](004-head-options-cors-etag.md) (the `Allow` list now includes HEAD and OPTIONS), [ADR-007](007-authentication-and-authorization.md) (PUT/DELETE now require authentication; DELETE is admin only).
 
 ## Context
 Lecture 05 requires `PUT /events/1` (replace, 404 if absent in this exercise) and `DELETE /events/1` (204 without body, 404 if absent). The request carries the id both in the URL and, potentially, in the body.
@@ -17,7 +18,7 @@ Owner chose:
 - PUT replaces the whole event: `name` and `seats` required, same rules as POST ([ADR-002](002-event-creation-rules.md)). The URL id wins; an `id` in the body is ignored. Success is 200 with the stored event.
 - Existence is checked before the body is read: a missing event returns 404 whatever the body contains. PUT never creates (no upsert).
 - DELETE returns 204 with no body, 404 if absent, and ignores any request body.
-- Unsupported methods on `/events/:id` return 405 with `Allow: GET, PUT, DELETE`.
+- Unsupported methods on `/events/:id` return 405 with `Allow: GET, PUT, DELETE` (as first decided; the current list is `GET, HEAD, PUT, DELETE, OPTIONS`, see ADR-004).
 
 ## Trade-offs and consequences
 - 404-first means a client does not learn about validation problems until the event exists, and the server does not spend time reading a body for a resource that is absent.
