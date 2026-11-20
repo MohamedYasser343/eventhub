@@ -5,7 +5,7 @@
 - Playlist position: 9 (identified during the learning session).
 - Date: 2026-11-20
 - Learning status: Complete (owner approved the repository update).
-- Implementation status: Not started.
+- Implementation status: Complete (owner confirmed 2026-11-20).
 - Source availability: the teaching session used available transcript excerpts and summaries, not the entire recording. The full transcript was not independently reverified during documentation. The core lecture topics were validation categories, transformation, pagination coercion, placement in the request lifecycle and frontend versus backend validation. The detailed EventHub examples, security guidance, error-policy choices and source-of-truth discussion below are mentor explanations, not claims of verbatim lecture coverage.
 
 ## Learning objectives
@@ -141,7 +141,7 @@ Validate external data at boundaries; transform into explicit typed values; keep
 - [x] Conceptual notes, discussion and assignment documented.
 - [x] Learning status updated independently in docs/PROGRESS.md in the same commit.
 
-## Implementation evidence (coding agent; awaiting learner review)
+## Implementation evidence (coding agent; complete)
 
 Date: 2026-11-20. Environment: Linux, Node v24, `tsx`, native `node:http`, no new dependencies. Branch `feat/lecture-09-validation`. Decision: [ADR-008](../decisions/008-validation-policy.md) (accepted). Code: `backend/src/validation.ts` (new), wiring in `backend/src/server.ts`. Tests: `backend/test/validation.test.ts` (unit), `backend/test/validation-http.test.ts` (HTTP).
 
@@ -176,4 +176,4 @@ Commands: baseline before changes `cd backend && npm test` 138/138 and `npm run 
 - Strict unknown-field rejection on legacy endpoints (breaking change, not approved).
 - Header validation beyond what the app already consumes (bearer, content type); no new headers are read.
 - Persistence-level constraints and concurrency (deferred by the lecture).
-- Learner confirmation; implementation status stays "awaiting learner review".
+- Nothing pending: the owner confirmed completion on 2026-11-20.
