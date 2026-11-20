@@ -1,6 +1,6 @@
 # ADR-009: Application layers, middleware pipeline and request context
 
-Status: Proposed (awaiting owner confirmation)
+Status: Accepted (owner confirmed, 2026-11-20)
 Date: 2026-11-20
 Related lecture: [10 — Application layers](../lectures/10-application-layers.md)
 

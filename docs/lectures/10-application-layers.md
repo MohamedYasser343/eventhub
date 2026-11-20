@@ -5,7 +5,7 @@
 - Playlist position: 10 (identified in the session via lecture-specific notes and the existing roadmap; live playlist listing not independently checked).
 - Date: 2026-11-20
 - Learning status: Complete (owner explicitly confirmed).
-- Implementation status: Awaiting learner review (implemented 2026-11-20, owner confirmation pending).
+- Implementation status: Complete (owner confirmed 2026-11-20).
 - Source availability: [lecture-specific third-party transcript-derived notes](https://github.com/shubhamscifi/backend_from_first_principles_notes/blob/main/10_controllers_services_repositories/NOTES.md) identify the title, URL and scope (59:57). The original recording/transcript was not directly reviewed. The core topics are the internal request lifecycle, controller/service/repository separation, middleware and request context. EventHub examples, dependency injection, testing advice, and production qualifications are supplemental mentor explanations, not a verbatim account.
 
 ## Learning objectives
@@ -262,4 +262,4 @@ Environment: Node via `tsx`, branch `feat/lecture-10-application-layers`, 2026-1
 - [x] Implementation or reproducible experiment.
 - [x] Acceptance criteria demonstrated (see above).
 - [x] Negative cases and regression checks.
-- [ ] Implementation progress updated and learner confirmed (owner confirmation pending).
+- [x] Implementation progress updated and learner confirmed (2026-11-20).
