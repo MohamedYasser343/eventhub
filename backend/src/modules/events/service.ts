@@ -1,5 +1,5 @@
 import { validateEventInput, validateEventPatch } from "../../validation.ts";
-import type { FieldError } from "../../validation.ts";
+import type { FieldError, ListQuery } from "../../validation.ts";
 import type { Role } from "../../auth.ts";
 import type { EventItem, EventRepository } from "./repository.ts";
 
@@ -25,6 +25,25 @@ export class EventService {
   }
   get(id: number): EventItem | undefined {
     return this.repo.findById(id);
+  }
+  // Collection query: authorized scope (events are public, so all) -> filter ->
+  // deterministic sort (id is the unique tie-break, always ascending) -> page slice.
+  // total counts every matching event BEFORE slicing; totalPages = ceil(total/limit).
+  query(q: ListQuery): { data: EventItem[]; total: number; totalPages: number } {
+    const needle = q.q?.toLowerCase();
+    const matching = this.repo.findAll().filter(
+      (e) => (needle === undefined || e.name.toLowerCase().includes(needle)) && (q.minSeats === null || e.seats >= q.minSeats),
+    );
+    matching.sort((a, b) => {
+      const x = a[q.sort.field];
+      const y = b[q.sort.field];
+      return (x < y ? -q.sort.direction : x > y ? q.sort.direction : 0) || a.id - b.id;
+    });
+    return {
+      data: matching.slice(q.offset, q.offset + q.limit),
+      total: matching.length,
+      totalPages: Math.ceil(matching.length / q.limit),
+    };
   }
   search(needle: string): EventItem[] {
     const n = needle.toLowerCase();

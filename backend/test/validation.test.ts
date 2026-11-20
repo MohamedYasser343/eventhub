@@ -105,9 +105,9 @@ test("parsePage: default, bounds, and the coercions that must NOT be accepted", 
 
 test("parseListQuery: defaults, offset, repeated keys, aggregated errors", () => {
   const ok = parseListQuery({ page: ["3"], sort: ["-name"], city: ["Cairo"] });
-  assert.deepEqual(ok, { ok: true, value: { city: "Cairo", sort: { text: "-name", field: "name", direction: -1 }, page: 3, offset: 20 } });
+  assert.deepEqual(ok, { ok: true, value: { city: "Cairo", q: null, minSeats: null, limit: 10, sort: { text: "-name", field: "name", direction: -1 }, page: 3, offset: 20 } });
   const def = parseListQuery({});
-  assert.deepEqual(def.ok && def.value, { city: null, sort: { text: "id", field: "id", direction: 1 }, page: 1, offset: 0 });
+  assert.deepEqual(def.ok && def.value, { city: null, q: null, minSeats: null, limit: 10, sort: { text: "id", field: "id", direction: 1 }, page: 1, offset: 0 });
   assert.equal(parseListQuery({ unknown: ["x"] }).ok, true); // unknown keys ignored (legacy)
 
   const bad = parseListQuery({ page: ["1", "2"], sort: ["x"], city: ["a", "b"] });

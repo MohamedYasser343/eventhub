@@ -91,7 +91,7 @@ test("query: defaults, conversion, sort and unknown keys keep working", async ()
   assert.equal(res.status, 200);
   const j = (await res.json()) as { data: EventItem[]; meta: Record<string, unknown> };
   assert.deepEqual(j.data.map((e) => e.name), ["Synthetic Tech Meetup", "Synthetic Jazz Night"]);
-  assert.deepEqual(j.meta, { page: 1, pageSize: 10, total: 2, sort: "-name", city: "Cairo" });
+  assert.deepEqual(j.meta, { page: 1, pageSize: 10, total: 2, totalPages: 1, sort: "-name", city: "Cairo", q: null, minSeats: null });
   const far = (await (await fetch(`${V1()}/events?page=999999999`)).json()) as { data: unknown[] };
   assert.deepEqual(far.data, []);
 });

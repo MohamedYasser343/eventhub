@@ -78,7 +78,9 @@ export function parseId(text: string | undefined): number | null {
   return Number.isSafeInteger(n) ? n : null;
 }
 
-export const PAGE_SIZE = 10;
+export const DEFAULT_LIMIT = 10;
+export const MAX_LIMIT = 100;
+export const MAX_Q_LENGTH = 100;
 const MAX_PAGE_DIGITS = 9;
 
 // Syntax first (decimal digits only: no "", " 2", "2e1", "0x2", "+2", "02"),
@@ -107,16 +109,48 @@ export function parseSort(text: string | undefined): Result<SortSpec> {
   return { ok: true, value: { text: raw, field: m[2] as SortField, direction: m[1] === "-" ? -1 : 1 } };
 }
 
+// limit: 1..MAX_LIMIT, decimal digits only. Out-of-bounds values are REJECTED
+// (400), not silently capped, so a client never receives a different page size
+// than it asked for (ADR-010).
+export function parseLimit(text: string | undefined): Result<number> {
+  const raw = text ?? String(DEFAULT_LIMIT);
+  if (!/^[1-9][0-9]{0,2}$/.test(raw) || Number(raw) > MAX_LIMIT) {
+    return fail("limit", "INVALID_LIMIT", `limit must be an integer from 1 to ${MAX_LIMIT}`);
+  }
+  return { ok: true, value: Number(raw) };
+}
+
+// minSeats: non-negative integer, at most 9 digits ("0" allowed, no leading zeros).
+export function parseMinSeats(text: string | undefined): Result<number | null> {
+  if (text === undefined) return { ok: true, value: null };
+  if (!/^(0|[1-9][0-9]{0,8})$/.test(text)) {
+    return fail("minSeats", "INVALID_MIN_SEATS", "minSeats must be a non-negative integer");
+  }
+  return { ok: true, value: Number(text) };
+}
+
+// q: case-insensitive substring of the name; an empty q matches everything.
+export function parseNameFilter(text: string | undefined): Result<string | null> {
+  if (text === undefined) return { ok: true, value: null };
+  if (text.length > MAX_Q_LENGTH) {
+    return fail("q", "INVALID_Q", `q must be at most ${MAX_Q_LENGTH} characters`);
+  }
+  return { ok: true, value: text };
+}
+
 type Query = Record<string, string[]>;
 
 export interface ListQuery {
   city: string | null;
+  q: string | null;
+  minSeats: number | null;
   sort: SortSpec;
   page: number;
-  offset: number; // safe: page <= 10^9 - 1, so offset < 10^10
+  limit: number;
+  offset: number; // safe: page <= 10^9 - 1 and limit <= 100, so offset < 10^11
 }
 
-// A repeated scalar key is ambiguous and rejected. Unknown keys are ignored
+// city is echoed only (events have no city). A repeated scalar key is ambiguous and rejected. Unknown keys are ignored
 // (legacy policy). All independent errors are reported together.
 export function parseListQuery(query: Query): Result<ListQuery> {
   const errors: FieldError[] = [];
@@ -132,15 +166,24 @@ export function parseListQuery(query: Query): Result<ListQuery> {
   const city = one("city");
   const sortRaw = one("sort");
   const pageRaw = one("page");
+  const limitRaw = one("limit");
+  const qRaw = one("q");
+  const minSeatsRaw = one("minSeats");
 
   const sort = sortRaw === "REPEATED" ? null : parseSort(sortRaw);
   if (sort && !sort.ok) errors.push(...sort.errors);
   const page = pageRaw === "REPEATED" ? null : parsePage(pageRaw);
   if (page && !page.ok) errors.push(...page.errors);
+  const limit = limitRaw === "REPEATED" ? null : parseLimit(limitRaw);
+  if (limit && !limit.ok) errors.push(...limit.errors);
+  const q = qRaw === "REPEATED" ? null : parseNameFilter(qRaw);
+  if (q && !q.ok) errors.push(...q.errors);
+  const minSeats = minSeatsRaw === "REPEATED" ? null : parseMinSeats(minSeatsRaw);
+  if (minSeats && !minSeats.ok) errors.push(...minSeats.errors);
 
-  if (errors.length > 0 || !sort?.ok || !page?.ok) {
-    // Deterministic order (city, sort, page) so clients and tests can rely on it.
-    const order = ["city", "sort", "page"];
+  if (errors.length > 0 || !sort?.ok || !page?.ok || !limit?.ok || !q?.ok || !minSeats?.ok) {
+    // Deterministic order so clients and tests can rely on it.
+    const order = ["city", "q", "minSeats", "sort", "page", "limit"];
     errors.sort((a, b) => order.indexOf(a.path) - order.indexOf(b.path));
     return { ok: false, errors };
   }
@@ -148,9 +191,12 @@ export function parseListQuery(query: Query): Result<ListQuery> {
     ok: true,
     value: {
       city: city === undefined || city === "REPEATED" ? null : city,
+      q: q.value,
+      minSeats: minSeats.value,
       sort: sort.value,
       page: page.value,
-      offset: (page.value - 1) * PAGE_SIZE,
+      limit: limit.value,
+      offset: (page.value - 1) * limit.value,
     },
   };
 }
