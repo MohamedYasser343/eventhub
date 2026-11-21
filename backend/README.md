@@ -1,6 +1,22 @@
 # Backend
 
-Learning implementation of the EventHub HTTP boundary (lecture 05). Native `node:http` on Node/TypeScript, in-memory synthetic data, no framework and no database. See [ADR-001](../docs/decisions/001-backend-language-and-tooling.md) and [`../docs/lectures/05-http.md`](../docs/lectures/05-http.md). Not production-ready: state resets on restart, there is no authentication, persistence or concurrency control.
+Learning implementation of the EventHub HTTP boundary (lecture 05). Native `node:http` on Node/TypeScript, PostgreSQL persistence for users and events (lecture 12), no framework. See [ADR-001](../docs/decisions/001-backend-language-and-tooling.md) and [`../docs/lectures/05-http.md`](../docs/lectures/05-http.md). Not production-ready: sessions and the login rate limiter are in memory, there is no row locking on PUT/PATCH, and the schema is a learning schema (see ADR-011).
+
+## Database (lecture 12)
+
+Users and events live in PostgreSQL. Local dev uses Docker; credentials come from `backend/.env` (gitignored, template in `.env.example`).
+
+```bash
+cd backend
+cp .env.example .env     # choose your own local password; ports/names are in the file
+npm run db:up            # docker compose: postgres:17 on 127.0.0.1:56432
+docker exec eventhub-pg psql -U eventhub -d eventhub_dev -c 'create database eventhub_test'   # once
+npm run migrate          # apply migrations/*.sql to DATABASE_URL (idempotent)
+npm run seed             # demo users (random passwords printed once) + 2 synthetic events
+npm run experiment:explain   # EXPLAIN experiment on synthetic rows (TEST database only)
+```
+
+`npm test` requires `TEST_DATABASE_URL` (a database whose name ends in `_test`; it is truncated by the tests) and refuses anything else.
 
 ## Run
 

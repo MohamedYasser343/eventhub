@@ -6,8 +6,10 @@ import type { Middleware } from "../src/http/middleware.ts";
 import { EventService } from "../src/modules/events/service.ts";
 import type { EventItem, EventRepository } from "../src/modules/events/repository.ts";
 import { canCancelBooking } from "../src/modules/bookings/cancellation-policy.ts";
-import { eventOwners } from "../src/auth.ts";
-import { events, logSink } from "../src/server.ts";
+import { logSink } from "../src/server.ts";
+import { pool } from "../src/db/pool.ts";
+import { dbOwners } from "./db.ts";
+import { dbEvents, resetEvents, SEED } from "./db.ts";
 import { useServer, userToken } from "./helpers.ts";
 
 // ---------- service with a fake repository: no HTTP server involved ----------
@@ -16,65 +18,68 @@ class FakeRepo implements EventRepository {
   calls: string[] = [];
   items = new Map<number, EventItem>([[1, { id: 1, name: "One", seats: 5 }]]);
   owners = new Map<number, number>([[1, 7]]);
-  findById(id: number) { this.calls.push("findById"); return this.items.get(id); }
-  findAll() { this.calls.push("findAll"); return [...this.items.values()]; }
-  insert(f: { name: string; seats: number }, ownerId: number) {
+  async findById(id: number) { this.calls.push("findById"); return this.items.get(id); }
+  async findAll() { this.calls.push("findAll"); return [...this.items.values()]; }
+  async query() { this.calls.push("query"); return { data: [...this.items.values()], total: this.items.size }; }
+  async search() { this.calls.push("search"); return [...this.items.values()]; }
+  async insert(f: { name: string; seats: number }, ownerId: number) {
     this.calls.push("insert");
     const e = { id: 2, ...f }; this.items.set(2, e); this.owners.set(2, ownerId); return e;
   }
-  replace(id: number, f: { name: string; seats: number }) {
+  async replace(id: number, f: { name: string; seats: number }) {
     this.calls.push("replace");
     if (!this.items.has(id)) return undefined;
     const e = { id, ...f }; this.items.set(id, e); return e;
   }
-  remove(id: number) { this.calls.push("remove"); return this.items.delete(id); }
-  ownerOf(id: number) { return this.owners.get(id); }
+  async remove(id: number) { this.calls.push("remove"); return this.items.delete(id); }
+  async ownerOf(id: number) { return this.owners.get(id); }
 }
 const attendee = { id: 1, role: "attendee" as const };
 const owner = { id: 7, role: "organizer" as const };
 const other = { id: 8, role: "organizer" as const };
 const admin = { id: 99, role: "admin" as const };
 
-test("service: attendee cannot create; nothing reaches storage", () => {
+test("service: attendee cannot create; nothing reaches storage", async () => {
   const repo = new FakeRepo();
-  const r = new EventService(repo).create(attendee, { name: "X", seats: 1 });
+  const r = await new EventService(repo).create(attendee, { name: "X", seats: 1 });
   assert.deepEqual(r, { ok: false, error: { kind: "forbidden" } });
   assert.deepEqual(repo.calls, []);
 });
 
-test("service: invalid input is rejected before insert (no mutation)", () => {
+test("service: invalid input is rejected before insert (no mutation)", async () => {
   const repo = new FakeRepo();
-  const r = new EventService(repo).create(owner, { name: "", seats: -1 });
+  const r = await new EventService(repo).create(owner, { name: "", seats: -1 });
   assert.equal(r.ok, false);
   assert.equal(repo.calls.includes("insert"), false);
 });
 
-test("service: create records the ACTOR as owner, never a client field", () => {
+test("service: create records the ACTOR as owner, never a client field", async () => {
   const repo = new FakeRepo();
-  const r = new EventService(repo).create(owner, { name: "Mine", seats: 3, ownerId: 1, role: "admin" });
+  const r = await new EventService(repo).create(owner, { name: "Mine", seats: 3, ownerId: 1, role: "admin" });
   assert.equal(r.ok, true);
   assert.equal(repo.owners.get(2), owner.id);
 });
 
-test("service: replace/patch order is 404, then 403, then 422; owner and admin may edit", () => {
+test("service: replace/patch order is 404, then 403, then 422; owner and admin may edit", async () => {
   const svc = new EventService(new FakeRepo());
-  assert.deepEqual(svc.replace(owner, 42, {}), { ok: false, error: { kind: "not-found" } });
-  assert.deepEqual(svc.replace(other, 1, { name: "x", seats: 1 }), { ok: false, error: { kind: "forbidden" } });
-  assert.deepEqual(svc.patch(attendee, 1, { seats: 1 }), { ok: false, error: { kind: "forbidden" } });
-  const bad = svc.patch(owner, 1, { seats: -5 });
+  assert.deepEqual(await svc.replace(owner, 42, {}), { ok: false, error: { kind: "not-found" } });
+  assert.deepEqual(await svc.replace(other, 1, { name: "x", seats: 1 }), { ok: false, error: { kind: "forbidden" } });
+  assert.deepEqual(await svc.patch(attendee, 1, { seats: 1 }), { ok: false, error: { kind: "forbidden" } });
+  const bad = await svc.patch(owner, 1, { seats: -5 });
   assert.equal(!bad.ok && bad.error.kind, "invalid");
-  const ok = svc.patch(owner, 1, { seats: 9 });
+  const ok = await svc.patch(owner, 1, { seats: 9 });
   assert.deepEqual(ok, { ok: true, value: { id: 1, name: "One", seats: 9 } });
-  assert.equal(svc.replace(admin, 1, { name: "A", seats: 2 }).ok, true);
+  assert.equal((await svc.replace(admin, 1, { name: "A", seats: 2 })).ok, true);
 });
 
-test("service: remove is admin-only, 404 first", () => {
+test("service: remove is admin-only, 404 first", async () => {
   const repo = new FakeRepo();
   const svc = new EventService(repo);
-  assert.equal(!svc.remove(admin, 5).ok && (svc.remove(admin, 5) as { error: { kind: string } }).error.kind, "not-found");
-  assert.equal(!svc.remove(owner, 1).ok, true);
+  const gone = await svc.remove(admin, 5);
+  assert.equal(!gone.ok && gone.error.kind, "not-found");
+  assert.equal((await svc.remove(owner, 1)).ok, false);
   assert.equal(repo.items.has(1), true);
-  assert.equal(svc.remove(admin, 1).ok, true);
+  assert.equal((await svc.remove(admin, 1)).ok, true);
 });
 
 // ---------- middleware runner ----------
@@ -195,8 +200,8 @@ test("log line carries the response's request id and nothing sensitive", async (
 });
 
 test("rejected protected request (401) never reaches the service or storage", async () => {
-  const before = JSON.stringify(events);
-  const ownersBefore = eventOwners.size;
+  const before = JSON.stringify(await dbEvents());
+  const ownersBefore = await dbOwners();
   const { lines } = await withLog(async () => {
     const r = await fetch(`${api.base}/events`, {
       method: "POST",
@@ -209,8 +214,8 @@ test("rejected protected request (401) never reaches the service or storage", as
     assert.equal(del.status, 401);
   });
   await new Promise((r) => setTimeout(r, 20));
-  assert.equal(JSON.stringify(events), before);
-  assert.equal(eventOwners.size, ownersBefore);
+  assert.equal(JSON.stringify(await dbEvents()), before);
+  assert.deepEqual(await dbOwners(), ownersBefore);
   assert.equal(lines.filter((l) => JSON.parse(l).status === 401).length, 2);
 });
 
@@ -258,8 +263,9 @@ test("interleaved authenticated requests keep their own identity and request id"
   assert.equal(ra.status, 201);
   assert.equal(rb.status, 201);
   assert.notEqual(ra.requestId, rb.requestId);
-  assert.equal(eventOwners.get(ra.body.id), alice.id);
-  assert.equal(eventOwners.get(rb.body.id), bob.id);
+  const owners = new Map(await dbOwners());
+  assert.equal(owners.get(ra.body.id), alice.id);
+  assert.equal(owners.get(rb.body.id), bob.id);
 });
 
 test("impersonation attempt: body ownerId/role/id are ignored", async () => {
@@ -273,13 +279,17 @@ test("impersonation attempt: body ownerId/role/id are ignored", async () => {
   assert.equal(r.status, 201);
   assert.notEqual(created.id, 1);
   assert.deepEqual(Object.keys(created).sort(), ["id", "name", "seats"]);
-  assert.equal(eventOwners.get(created.id), org.id);
+  assert.equal((await dbOwners()).find(([id]) => id === created.id)?.[1], org.id);
 });
 
 test("an exception downstream becomes one safe 500 with the request id", async () => {
-  const realPush = events.push;
-  events.push = () => { throw new Error("db password is hunter2"); };
-  const before = events.length;
+  // A real storage failure: the database call throws an error carrying a secret.
+  const realQuery = pool.query.bind(pool) as (...a: unknown[]) => unknown;
+  (pool as unknown as { query: unknown }).query = (...a: unknown[]) => {
+    if (typeof a[0] === "string" && a[0].includes("INSERT INTO events")) throw new Error("db password is hunter2");
+    return realQuery(...a);
+  };
+  const before = (await dbEvents()).length;
   try {
     const { result, lines } = await withLog(() =>
       fetch(`${api.base}/events`, { method: "POST", headers: json, body: JSON.stringify({ name: "Boom", seats: 1 }) }),
@@ -293,9 +303,9 @@ test("an exception downstream becomes one safe 500 with the request id", async (
     assert.equal(lines.join("\n").includes("hunter2"), false, "error message must not be logged");
     assert.ok(lines.some((l) => JSON.parse(l).level === "error"));
   } finally {
-    events.push = realPush;
+    (pool as unknown as { query: unknown }).query = realQuery;
   }
-  assert.equal(events.length, before);
+  assert.equal((await dbEvents()).length, before);
   // the server is still healthy afterwards
   assert.equal((await fetch(`${api.base}/health`)).status, 200);
 });

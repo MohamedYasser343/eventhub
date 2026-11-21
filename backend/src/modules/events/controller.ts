@@ -40,19 +40,19 @@ export function createEventsController(events: EventService) {
   // body arrives, so a concurrent delete or change is still handled.
   async function modify(op: "replace" | "patch", req: IncomingMessage, res: ServerResponse, ctx: Authed): Promise<void> {
     const id = idOf(ctx);
-    const pre = events.authorizeEdit(ctx.user, id);
+    const pre = await events.authorizeEdit(ctx.user, id);
     if (!pre.ok) return sendEventError(req, res, pre.error);
     const body = await readJson(req, res);
     if (!body) return;
-    const r: Outcome<EventItem> = events[op](ctx.user, id, body.value);
+    const r: Outcome<EventItem> = await events[op](ctx.user, id, body.value);
     if (!r.ok) return sendEventError(req, res, r.error);
     sendJson(res, 200, r.value);
   }
 
   return {
     // Legacy unversioned list: the bare array of lecture 05.
-    listLegacy(_req: IncomingMessage, res: ServerResponse): void {
-      sendJson(res, 200, events.list());
+    async listLegacy(_req: IncomingMessage, res: ServerResponse): Promise<void> {
+      sendJson(res, 200, await events.list());
     },
 
     // Query policy (validation.ts, ADR-010): city, q, minSeats, sort, page and limit
@@ -61,11 +61,11 @@ export function createEventsController(events: EventService) {
     // (default 10); invalid values are rejected, not capped. A page past the end is a
     // valid query: 200 with an empty data array. Unknown keys are ignored. Events have
     // no city, so city is echoed back but does not filter (deliberate simplification).
-    listV1(_req: IncomingMessage, res: ServerResponse, ctx: RouteContext): void {
+    async listV1(_req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
       const parsed = parseListQuery(ctx.query);
       if (!parsed.ok) return badQuery(res, parsed.errors);
       const { city, q, minSeats, sort, page, limit } = parsed.value;
-      const r = events.query(parsed.value);
+      const r = await events.query(parsed.value);
       sendJson(res, 200, {
         data: r.data,
         meta: { page, pageSize: limit, total: r.total, totalPages: r.totalPages, sort: sort.text, city, q, minSeats },
@@ -73,14 +73,14 @@ export function createEventsController(events: EventService) {
     },
 
     // Mock search: case-insensitive substring match on the name; no q returns all.
-    searchV1(_req: IncomingMessage, res: ServerResponse, ctx: RouteContext): void {
+    async searchV1(_req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
       const q = scalar(ctx.query, "q");
       if (!q.ok) return badQuery(res, [{ path: "q", code: "REPEATED", message: "q must not be repeated" }]);
-      sendJson(res, 200, { data: events.search(q.value ?? ""), meta: { q: q.value ?? null } });
+      sendJson(res, 200, { data: await events.search(q.value ?? ""), meta: { q: q.value ?? null } });
     },
 
-    get(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): void {
-      const event = events.get(idOf(ctx));
+    async get(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
+      const event = await events.get(idOf(ctx));
       if (!event) return notFound(res);
       const etag = etagOf(JSON.stringify(event));
       const headers = { ETag: etag, "Cache-Control": "no-cache" };
@@ -97,7 +97,7 @@ export function createEventsController(events: EventService) {
       if (!events.canCreate(ctx.user)) return forbidden(req, res);
       const body = await readJson(req, res);
       if (!body) return;
-      const r = events.create(ctx.user, body.value);
+      const r = await events.create(ctx.user, body.value);
       if (!r.ok) return sendEventError(req, res, r.error);
       sendJson(res, 201, r.value, { Location: `${ctx.prefix}/events/${r.value.id}` });
     },
@@ -105,8 +105,8 @@ export function createEventsController(events: EventService) {
     replace: (req: IncomingMessage, res: ServerResponse, ctx: Authed) => modify("replace", req, res, ctx),
     patch: (req: IncomingMessage, res: ServerResponse, ctx: Authed) => modify("patch", req, res, ctx),
 
-    remove(req: IncomingMessage, res: ServerResponse, ctx: Authed): void {
-      const r = events.remove(ctx.user, idOf(ctx));
+    async remove(req: IncomingMessage, res: ServerResponse, ctx: Authed): Promise<void> {
+      const r = await events.remove(ctx.user, idOf(ctx));
       if (!r.ok) return sendEventError(req, res, r.error);
       res.writeHead(204, ignoredBodyHeaders(req));
       res.end();

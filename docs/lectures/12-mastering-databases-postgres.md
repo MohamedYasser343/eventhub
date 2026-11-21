@@ -480,11 +480,50 @@ The teaching session explained the topics with EventHub-specific examples, diagr
 - [x] Concepts, examples, source limitations, diagrams, misconceptions and assignment documented.
 - [x] Learning completion tracked separately from implementation in docs/PROGRESS.md.
 
-## Implementation evidence (coding agent; pending)
+## Implementation evidence (coding agent)
 
-No implementation, new migration, database fixture, test run, benchmark, schema inspection or implementation approval is claimed by this note.
+Status: **implemented, awaiting owner review.** Branch `feat/lecture-12-postgres` (not merged). Owner decisions during implementation: users also move to PostgreSQL; the in-memory repository is removed ([ADR-011](../decisions/011-postgresql-persistence.md)).
 
-- [ ] Implementation/experiment performed and commits linked.
-- [ ] Actual commands and results recorded (including negative and concurrency cases).
-- [ ] Acceptance criteria demonstrated and prior regressions checked.
+**Environment:** Node v24.22.1, `pg` 8.23, PostgreSQL 17 (Docker `postgres:17`, 17.11) on 127.0.0.1:56432, Linux 7.0, i7-1255U / 22.7 GiB. Databases `eventhub_dev` and `eventhub_test`; credentials only in the gitignored `backend/.env`.
+
+**What was built**
+
+| Step | Result |
+| --- | --- |
+| 1 Baseline | Before changes: `npm test` 198/198, `npm run typecheck` clean (in-memory). |
+| 2 Local Postgres | `backend/docker-compose.yml`, `.env.example`, `npm run db:up`. |
+| 3 Schema/migrations | `migrations/001_users_events.sql`, runner `src/db/migrate.ts` (transaction per file, checksum, advisory lock). |
+| 4 Adapter | `PgEventRepository`, `PgUserRepository`; services/controllers/auth made async; SQL-side filter/sort/paging; sort allowlist; collation "C". |
+| 5 Persistence | Test spawns the server process twice on one database: the event and the demo user survive; the old session token is rejected after restart (sessions are in memory). |
+| 6 Transaction lab | `test/lab/booking-lab.ts` (isolated, no route; table created and dropped by the test). |
+| 7 EXPLAIN | `npm run experiment:explain` -> [docs/evidence/lecture-12-explain.txt](../evidence/lecture-12-explain.txt). |
+
+**Commands and observed results (2026-11-22)**
+
+- `npm run migrate` twice on the dev DB: `applied: 001_users_events.sql`, then `up to date`. `npm run seed` twice: created users and 2 events, then "already exists / nothing inserted".
+- `npm run typecheck`: clean. `npm test` (run twice in a row): **214 tests, 214 pass, 0 fail** (198 pre-existing, migrated to the Postgres test DB, plus 16 in `test/postgres.test.ts`). Not run: any load/benchmark beyond the experiment below.
+
+**Acceptance criteria**
+
+1. API behavior preserved: all 198 earlier tests pass unchanged in intent (only their storage assertions now read the database).
+2. Migrations rebuild an empty database and re-running applies nothing (test creates and drops `eventhub_migrate_test`; concurrent runners apply the file once; a tampered checksum is refused).
+3. Restart test above (demonstrates process restart only, not disk or host failure).
+4. Constraint test: negative/oversized seats, blank/long name, NULL, unknown FK owner, owner delete (RESTRICT), short username, bad role, case-insensitive duplicate username (409 over HTTP with no SQL text), 6 concurrent registrations -> exactly one 201.
+5. `x'); DROP TABLE events; --` stored and found literally; `%`, `_`, `' OR 1=1 --` match nothing; malicious `sort`/`minSeats` -> 400; authorization still enforced in the service (existing auth tests).
+6. `GET /api/v1/events` and `/events/:id`, `/search` read from Postgres; ties broken by id; name sort byte-wise; bounded paging unchanged.
+7. Race: 2 buyers for 1 seat -> 1 success; 30 contenders for 7 seats -> 7 bookings, stock 0 (inventory and rows checked, not statuses).
+8. Rollback: INSERT fails (FK on a missing user) after the decrement -> stock unchanged; `pg_backend_pid()` identical for all statements of the transaction; 25 failures with a pool of 10 leak no connection. **Negative control:** read-then-write lost updates (8 buyers, stock 10 ended above 2), proving the test can detect the race.
+9. Query plans before/after in the evidence file (200k synthetic rows, one warm run, local Docker): page 1 ~18 ms -> ~0.02 ms with an index; INSERT of 50k rows 360 ms -> 602 ms with two extra indexes; index sizes 6 MB and 15 MB. Single-run, indicative only; no index committed to the schema.
+10. Tests and typecheck as above.
+
+**Known limitations / simplifications**
+
+- PUT/PATCH are read-then-write (lost update possible); no row locking yet.
+- Sessions, rate limiter and synthetic tickets are in memory. `POST /bookings` is still the 501 stub; the booking lab is test-only.
+- Tests need Docker Postgres and run serially against one `_test` database. The database outage test simulates the failure by stubbing the pool; a real stop of the container was not exercised.
+- Not measured: `sort=-seats` with the candidate index, larger or non-uniform data, concurrent write load.
+
+- [x] Implementation/experiment performed (commit linked after review).
+- [x] Actual commands and results recorded (including negative and concurrency cases).
+- [x] Acceptance criteria demonstrated and prior regressions checked (see above).
 - [ ] Owner confirms implementation completion and progress tracker updated independently.

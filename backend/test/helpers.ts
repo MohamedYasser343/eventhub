@@ -1,7 +1,8 @@
 import { after, before } from "node:test";
 import type { AddressInfo } from "node:net";
-import { server } from "../src/server.ts";
-import { auth } from "../src/auth.ts";
+import { server, auth } from "../src/server.ts";
+import { pool } from "../src/db/pool.ts";
+import { resetAll, resetEvents } from "./db.ts";
 import type { Role } from "../src/auth.ts";
 
 // Trusted test-only helper: create a synthetic user with any role and log in over HTTP.
@@ -32,6 +33,8 @@ export function useServer(opts: { asAdmin?: boolean } = {}): { readonly base: st
   const state = { base: "", adminToken: "" };
   const realFetch = globalThis.fetch;
   before(async () => {
+    await resetAll();
+    await resetEvents(); // the two synthetic events every HTTP test file starts from
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     state.base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     state.adminToken = (await userToken(state.base, "admin")).token;
@@ -46,9 +49,10 @@ export function useServer(opts: { asAdmin?: boolean } = {}): { readonly base: st
       }) as typeof fetch;
     }
   });
-  after(() => {
+  after(async () => {
     globalThis.fetch = realFetch;
     server.close();
+    await pool.end();
   });
   return state;
 }

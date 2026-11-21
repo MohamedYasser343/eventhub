@@ -1,10 +1,12 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { parseQuery, Router } from "./router.ts";
 import type { Query, Registrar } from "./router.ts";
-import { auth, eventOwners, ticketsByUser } from "./auth.ts";
+import { AuthService, ticketsByUser } from "./auth.ts";
+import { pool } from "./db/pool.ts";
+import { seedDemo } from "./db/seed.ts";
+import { PgUserRepository } from "./modules/auth/user-repository.ts";
 import { createProtect, ignoredBodyHeaders, sendJson } from "./http/app.ts";
 import type { AppHandler, RouteContext } from "./http/app.ts";
 import { createRequestContext } from "./http/context.ts";
@@ -13,7 +15,7 @@ import type { Middleware } from "./http/middleware.ts";
 import { createAuthController } from "./modules/auth/controller.ts";
 import { AccountService } from "./modules/auth/service.ts";
 import { createEventsController } from "./modules/events/controller.ts";
-import { InMemoryEventRepository } from "./modules/events/repository.ts";
+import { PgEventRepository } from "./modules/events/repository.ts";
 import type { EventItem } from "./modules/events/repository.ts";
 import { EventService } from "./modules/events/service.ts";
 import { createTicketsController } from "./modules/tickets/controller.ts";
@@ -22,16 +24,12 @@ import { TicketService } from "./modules/tickets/service.ts";
 
 export type { EventItem, RouteContext };
 
-// In-memory store with synthetic data. State resets on restart.
-export const events: EventItem[] = [
-  { id: 1, name: "Synthetic Jazz Night", seats: 120 },
-  { id: 2, name: "Synthetic Tech Meetup", seats: 80 },
-];
 
 // ---------- composition root ----------
 // The only place where concrete classes are chosen and wired, by hand (no DI
 // container). Dependencies point inward: controller -> service -> repository.
-const eventService = new EventService(new InMemoryEventRepository(events, eventOwners));
+export const auth = new AuthService(new PgUserRepository(pool));
+const eventService = new EventService(new PgEventRepository(pool));
 const ticketService = new TicketService(new InMemoryTicketRepository(ticketsByUser), eventService);
 const accountService = new AccountService(auth);
 const protect = createProtect(auth);
@@ -245,15 +243,7 @@ export const server = createServer((req, res) => {
 const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 if (isMain) {
   const port = Number(process.env.PORT ?? 8080);
-  if (process.env.SEED_DEMO_USERS === "1") {
-    // Trusted startup path for privileged synthetic users; random passwords are
-    // printed once and never stored in the repository.
-    for (const role of ["organizer", "admin"] as const) {
-      const password = randomBytes(12).toString("base64url");
-      await auth.createUser(`demo_${role}`, password, role);
-      console.log(`demo user demo_${role} password ${password}`);
-    }
-  }
+  if (process.env.SEED_DEMO_USERS === "1") await seedDemo(auth, pool); // same as `npm run seed`
   server.listen(port, "127.0.0.1", () => {
     console.log(`EventHub listening on http://127.0.0.1:${port}`);
   });

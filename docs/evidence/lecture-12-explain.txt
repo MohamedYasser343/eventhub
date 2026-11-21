@@ -1,0 +1,122 @@
+date: 2026-11-21T23:05:42.014Z
+host: 12th Gen Intel(R) Core(TM) i7-1255U x12, 22.7 GiB RAM, linux 7.0.0-43-generic
+node: v24.22.1
+postgres: PostgreSQL 17.11 (Debian 17.11-1.pgdg13+2) on x86_64-pc-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit
+rows: 200000 synthetic events (random seats 0..100000, md5 names)
+note: single machine, Postgres in Docker, one warm run per query; not a benchmark.
+
+table size: 21 MB; primary key index: 4408 kB; owner index: 1272 kB
+
+==== BEFORE candidate indexes ====
+
+-- A: sort=seats (page 1, limit 10)
+SELECT id, name, seats FROM events ORDER BY seats ASC, id ASC LIMIT 10 OFFSET 0
+Limit  (cost=7385.79..7386.94 rows=10 width=55) (actual time=16.114..18.068 rows=10 loops=1)
+  Buffers: shared hit=2711
+  ->  Gather Merge  (cost=7385.79..20915.19 rows=117647 width=55) (actual time=16.113..18.065 rows=10 loops=1)
+        Workers Planned: 1
+        Workers Launched: 1
+        Buffers: shared hit=2711
+        ->  Sort  (cost=6385.78..6679.90 rows=117647 width=55) (actual time=14.681..14.682 rows=8 loops=2)
+              Sort Key: seats, id
+              Sort Method: top-N heapsort  Memory: 27kB
+              Buffers: shared hit=2711
+              Worker 0:  Sort Method: top-N heapsort  Memory: 27kB
+              ->  Parallel Seq Scan on events  (cost=0.00..3843.47 rows=117647 width=55) (actual time=0.007..6.319 rows=100000 loops=2)
+                    Buffers: shared hit=2667
+Planning Time: 0.063 ms
+Execution Time: 18.081 ms
+
+-- B: sort=name (page 1, limit 10)
+SELECT id, name, seats FROM events ORDER BY name COLLATE "C" ASC, id ASC LIMIT 10 OFFSET 0
+Limit  (cost=7385.79..7386.94 rows=10 width=87) (actual time=16.683..18.494 rows=10 loops=1)
+  Buffers: shared hit=2712
+  ->  Gather Merge  (cost=7385.79..20915.19 rows=117647 width=87) (actual time=16.682..18.492 rows=10 loops=1)
+        Workers Planned: 1
+        Workers Launched: 1
+        Buffers: shared hit=2712
+        ->  Sort  (cost=6385.78..6679.90 rows=117647 width=87) (actual time=15.353..15.355 rows=9 loops=2)
+              Sort Key: name COLLATE "C", id
+              Sort Method: top-N heapsort  Memory: 27kB
+              Buffers: shared hit=2712
+              Worker 0:  Sort Method: top-N heapsort  Memory: 26kB
+              ->  Parallel Seq Scan on events  (cost=0.00..3843.47 rows=117647 width=87) (actual time=0.006..6.662 rows=100000 loops=2)
+                    Buffers: shared hit=2667
+Planning Time: 0.050 ms
+Execution Time: 18.509 ms
+
+-- C: sort=seats, minSeats=99000 (page 1)
+SELECT id, name, seats FROM events WHERE seats >= 99000 ORDER BY seats ASC, id ASC LIMIT 10 OFFSET 0
+Limit  (cost=5210.33..5210.35 rows=10 width=55) (actual time=8.595..8.597 rows=10 loops=1)
+  Buffers: shared hit=2667
+  ->  Sort  (cost=5210.33..5215.34 rows=2005 width=55) (actual time=8.593..8.594 rows=10 loops=1)
+        Sort Key: seats, id
+        Sort Method: top-N heapsort  Memory: 27kB
+        Buffers: shared hit=2667
+        ->  Seq Scan on events  (cost=0.00..5167.00 rows=2005 width=55) (actual time=0.006..8.380 rows=2003 loops=1)
+              Filter: (seats >= 99000)
+              Rows Removed by Filter: 197997
+              Buffers: shared hit=2667
+Planning Time: 0.053 ms
+Execution Time: 8.609 ms
+
+-- D: sort=seats, deep page (OFFSET 100000)
+SELECT id, name, seats FROM events ORDER BY seats ASC, id ASC LIMIT 10 OFFSET 100000
+Limit  (cost=29365.64..29365.67 rows=10 width=55) (actual time=95.496..95.499 rows=10 loops=1)
+  Buffers: shared hit=2667, temp read=976 written=1626
+  ->  Sort  (cost=29115.64..29615.64 rows=200000 width=55) (actual time=84.198..93.400 rows=100010 loops=1)
+        Sort Key: seats, id
+        Sort Method: external merge  Disk: 12952kB
+        Buffers: shared hit=2667, temp read=976 written=1626
+        ->  Seq Scan on events  (cost=0.00..4667.00 rows=200000 width=55) (actual time=0.012..19.556 rows=200000 loops=1)
+              Buffers: shared hit=2667
+Planning Time: 0.079 ms
+Execution Time: 97.633 ms
+
+index sizes: seats,id = 6184 kB; name,id = 15 MB
+
+==== AFTER candidate indexes ====
+
+-- A: sort=seats (page 1, limit 10)
+SELECT id, name, seats FROM events ORDER BY seats ASC, id ASC LIMIT 10 OFFSET 0
+Limit  (cost=0.42..1.26 rows=10 width=55) (actual time=0.008..0.013 rows=10 loops=1)
+  Buffers: shared hit=13
+  ->  Index Scan using events_seats_id_idx on events  (cost=0.42..16760.34 rows=200000 width=55) (actual time=0.008..0.012 rows=10 loops=1)
+        Buffers: shared hit=13
+Planning Time: 0.036 ms
+Execution Time: 0.023 ms
+
+-- B: sort=name (page 1, limit 10)
+SELECT id, name, seats FROM events ORDER BY name COLLATE "C" ASC, id ASC LIMIT 10 OFFSET 0
+Limit  (cost=0.42..1.48 rows=10 width=87) (actual time=0.008..0.012 rows=10 loops=1)
+  Buffers: shared hit=13
+  ->  Index Scan using events_name_c_id_idx on events  (cost=0.42..21236.28 rows=200000 width=87) (actual time=0.007..0.011 rows=10 loops=1)
+        Buffers: shared hit=13
+Planning Time: 0.051 ms
+Execution Time: 0.020 ms
+
+-- C: sort=seats, minSeats=99000 (page 1)
+SELECT id, name, seats FROM events WHERE seats >= 99000 ORDER BY seats ASC, id ASC LIMIT 10 OFFSET 0
+Limit  (cost=0.42..29.20 rows=10 width=55) (actual time=0.006..0.010 rows=10 loops=1)
+  Buffers: shared hit=13
+  ->  Index Scan using events_seats_id_idx on events  (cost=0.42..6250.37 rows=2172 width=55) (actual time=0.005..0.008 rows=10 loops=1)
+        Index Cond: (seats >= 99000)
+        Buffers: shared hit=13
+Planning:
+  Buffers: shared hit=4
+Planning Time: 0.050 ms
+Execution Time: 0.016 ms
+
+-- D: sort=seats, deep page (OFFSET 100000)
+SELECT id, name, seats FROM events ORDER BY seats ASC, id ASC LIMIT 10 OFFSET 100000
+Limit  (cost=8380.38..8381.22 rows=10 width=55) (actual time=26.458..26.461 rows=10 loops=1)
+  Buffers: shared hit=100348
+  ->  Index Scan using events_seats_id_idx on events  (cost=0.42..16760.34 rows=200000 width=55) (actual time=0.009..24.720 rows=100010 loops=1)
+        Buffers: shared hit=100348
+Planning Time: 0.057 ms
+Execution Time: 26.474 ms
+
+==== write cost ====
+insert 50000 rows with 2 extra indexes: 602 ms
+insert 50000 rows without them:        360 ms
+(bulk load of 200000 rows without extra indexes took 1294 ms)

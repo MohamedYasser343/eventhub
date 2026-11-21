@@ -1,8 +1,7 @@
 import { before, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { events } from "../src/server.ts";
 import type { EventItem } from "../src/server.ts";
-import { eventOwners } from "../src/auth.ts";
+import { dbEvents, dbOwners, resetEvents, SEED } from "./db.ts";
 import { useServer } from "./helpers.ts";
 
 const api = useServer();
@@ -10,8 +9,8 @@ const V1 = () => `${api.base}/api/v1`;
 const JSON_H = { "Content-Type": "application/json" };
 
 let seed: EventItem[] = [];
-before(() => { seed = structuredClone(events); });
-beforeEach(() => { events.splice(0, events.length, ...structuredClone(seed)); });
+before(() => { seed = structuredClone(SEED); });
+beforeEach(async () => { await resetEvents(seed); });
 
 type Body = { error: string; details: string[]; errors: { path: string; code: string; message: string }[] };
 
@@ -25,8 +24,8 @@ test("POST invalid: 422 keeps legacy details and adds errors[path,code]", async 
 });
 
 test("invalid POST/PUT/PATCH never mutate state, ownership or the id counter", async () => {
-  const before = structuredClone(events);
-  const ownersBefore = new Map(eventOwners);
+  const before = structuredClone(await dbEvents());
+  const ownersBefore = await dbOwners();
   const bad = [
     fetch(`${V1()}/events`, { method: "POST", headers: JSON_H, body: JSON.stringify({ name: "x", seats: -1 }) }),
     fetch(`${V1()}/events/1`, { method: "PUT", headers: JSON_H, body: JSON.stringify({ name: "", seats: 1 }) }),
@@ -35,8 +34,8 @@ test("invalid POST/PUT/PATCH never mutate state, ownership or the id counter", a
     fetch(`${V1()}/events/1`, { method: "PATCH", headers: JSON_H, body: "{}" }),
   ];
   for (const r of await Promise.all(bad)) assert.equal(r.status, 422);
-  assert.deepEqual(events, before);
-  assert.deepEqual(new Map(eventOwners), ownersBefore);
+  assert.deepEqual(await dbEvents(), before);
+  assert.deepEqual(await dbOwners(), ownersBefore);
 
   // Early rejection: five rejected requests consumed no id (counter only moves on success).
   const a = (await (await fetch(`${V1()}/events`, { method: "POST", headers: JSON_H, body: JSON.stringify({ name: "A", seats: 1 }) })).json()) as EventItem;
@@ -60,7 +59,7 @@ test("write-field injection: id is ignored (legacy policy), only name and seats 
   const created = (await res.json()) as EventItem;
   assert.notEqual(created.id, 1);
   assert.deepEqual(Object.keys(created).sort(), ["id", "name", "seats"]);
-  assert.equal(events.find((e) => e.id === 1)?.name, "Synthetic Jazz Night");
+  assert.equal((await dbEvents()).find((e) => e.id === 1)?.name, "Synthetic Jazz Night");
 });
 
 test("query: 400 with errors[] for repeated, malformed and oversized values", async () => {
@@ -104,7 +103,7 @@ test("path ids beyond MAX_SAFE_INTEGER are a clean 404 and never hit a rounded i
     }
     assert.equal((await fetch(`${V1()}/events/${id}/tickets`)).status, 404);
   }
-  assert.equal(events.length, seed.length);
+  assert.equal((await dbEvents()).length, seed.length);
 });
 
 test("regression: body-level errors keep their statuses; booking stays a 501 stub", async () => {

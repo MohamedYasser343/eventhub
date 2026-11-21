@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
-import { events } from "../src/server.ts";
+import { dbEvents, resetEvents, SEED } from "./db.ts";
 import { useServer } from "./helpers.ts";
 
 const api = useServer();
@@ -35,7 +35,7 @@ for (const bad of ["page=0", "page=abc", "page=", "page=1&page=2", "sort=price",
 }
 
 test("GET and POST on the same v1 path dispatch differently; Location carries the prefix", async () => {
-  const before = events.length;
+  const before = (await dbEvents()).length;
   const res = await fetch(v1("/events"), {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -44,7 +44,7 @@ test("GET and POST on the same v1 path dispatch differently; Location carries th
   assert.equal(res.status, 201);
   const created = (await res.json()) as { id: number };
   assert.equal(res.headers.get("location"), `/api/v1/events/${created.id}`);
-  assert.equal(events.length, before + 1);
+  assert.equal((await dbEvents()).length, before + 1);
   assert.equal((await fetch(v1(`/events/${created.id}`), { method: "DELETE" })).status, 204);
 });
 
@@ -75,14 +75,14 @@ test("nested route extracts the parent id; missing parent is 404", async () => {
 });
 
 test("POST /api/v1/bookings is a stub: 501 and nothing changes", async () => {
-  const snapshot = JSON.stringify(events);
+  const snapshot = JSON.stringify(await dbEvents());
   const res = await fetch(v1("/bookings"), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ eventId: 1, quantity: 1 }),
   });
   assert.equal(res.status, 501);
-  assert.equal(JSON.stringify(events), snapshot);
+  assert.equal(JSON.stringify(await dbEvents()), snapshot);
   const wrong = await fetch(v1("/bookings"));
   assert.equal(wrong.status, 405);
   assert.equal(wrong.headers.get("allow"), "POST, OPTIONS");
@@ -104,10 +104,10 @@ test("PATCH /api/v1/events/:id changes only the given fields; invalid input muta
   const ok = await patch({ seats: 11 });
   assert.equal(ok.status, 200);
   assert.deepEqual(await ok.json(), { id, name: "Patch Me", seats: 11 });
-  const snapshot = JSON.stringify(events);
+  const snapshot = JSON.stringify(await dbEvents());
   assert.equal((await patch({ seats: -1 })).status, 422);
   assert.equal((await patch({})).status, 422);
-  assert.equal(JSON.stringify(events), snapshot);
+  assert.equal(JSON.stringify(await dbEvents()), snapshot);
   await fetch(v1(`/events/${id}`), { method: "DELETE" });
 });
 

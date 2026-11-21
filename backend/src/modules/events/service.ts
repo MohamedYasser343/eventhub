@@ -20,84 +20,73 @@ const fail = (error: EventError): { ok: false; error: EventError } => ({ ok: fal
 export class EventService {
   constructor(private readonly repo: EventRepository) {}
 
-  list(): EventItem[] {
+  list(): Promise<EventItem[]> {
     return this.repo.findAll();
   }
-  get(id: number): EventItem | undefined {
+  get(id: number): Promise<EventItem | undefined> {
     return this.repo.findById(id);
   }
   // Collection query: authorized scope (events are public, so all) -> filter ->
-  // deterministic sort (id is the unique tie-break, always ascending) -> page slice.
-  // total counts every matching event BEFORE slicing; totalPages = ceil(total/limit).
-  query(q: ListQuery): { data: EventItem[]; total: number; totalPages: number } {
-    const needle = q.q?.toLowerCase();
-    const matching = this.repo.findAll().filter(
-      (e) => (needle === undefined || e.name.toLowerCase().includes(needle)) && (q.minSeats === null || e.seats >= q.minSeats),
-    );
-    matching.sort((a, b) => {
-      const x = a[q.sort.field];
-      const y = b[q.sort.field];
-      return (x < y ? -q.sort.direction : x > y ? q.sort.direction : 0) || a.id - b.id;
-    });
-    return {
-      data: matching.slice(q.offset, q.offset + q.limit),
-      total: matching.length,
-      totalPages: Math.ceil(matching.length / q.limit),
-    };
+  // deterministic sort (id is the unique tie-break, always ascending) -> page slice,
+  // all executed by the repository. totalPages = ceil(total / limit).
+  async query(q: ListQuery): Promise<{ data: EventItem[]; total: number; totalPages: number }> {
+    const { data, total } = await this.repo.query(q);
+    return { data, total, totalPages: Math.ceil(total / q.limit) };
   }
-  search(needle: string): EventItem[] {
-    const n = needle.toLowerCase();
-    return this.repo.findAll().filter((e) => e.name.toLowerCase().includes(n));
+  search(needle: string): Promise<EventItem[]> {
+    return this.repo.search(needle);
   }
 
   // Business authorization. Organizers manage only events they own.
   canCreate(actor: Actor): boolean {
     return actor.role === "organizer" || actor.role === "admin";
   }
-  private canEdit(actor: Actor, id: number): boolean {
-    return actor.role === "admin" || (actor.role === "organizer" && this.repo.ownerOf(id) === actor.id);
+  private async canEdit(actor: Actor, id: number): Promise<boolean> {
+    return actor.role === "admin" || (actor.role === "organizer" && (await this.repo.ownerOf(id)) === actor.id);
   }
 
   // Cheap pre-flight (existence, then permission) so a caller can reject before
   // reading a request body. Every mutating method below re-checks, so the rule
   // holds for any caller (HTTP, CLI, job), not only the one that pre-flights.
-  authorizeEdit(actor: Actor, id: number): Outcome<EventItem> {
-    const current = this.repo.findById(id);
+  async authorizeEdit(actor: Actor, id: number): Promise<Outcome<EventItem>> {
+    const current = await this.repo.findById(id);
     if (!current) return fail({ kind: "not-found" });
-    if (!this.canEdit(actor, id)) return fail({ kind: "forbidden" });
+    if (!(await this.canEdit(actor, id))) return fail({ kind: "forbidden" });
     return { ok: true, value: current };
   }
 
-  create(actor: Actor, input: unknown): Outcome<EventItem> {
+  async create(actor: Actor, input: unknown): Promise<Outcome<EventItem>> {
     if (!this.canCreate(actor)) return fail({ kind: "forbidden" });
     const v = validateEventInput(input); // validate fully before touching the store
     if (!v.ok) return fail({ kind: "invalid", errors: v.errors });
-    return { ok: true, value: this.repo.insert(v.value, actor.id) };
+    return { ok: true, value: await this.repo.insert(v.value, actor.id) };
   }
 
-  replace(actor: Actor, id: number, input: unknown): Outcome<EventItem> {
-    const auth = this.authorizeEdit(actor, id);
+  async replace(actor: Actor, id: number, input: unknown): Promise<Outcome<EventItem>> {
+    const auth = await this.authorizeEdit(actor, id);
     if (!auth.ok) return auth;
     const v = validateEventInput(input);
     if (!v.ok) return fail({ kind: "invalid", errors: v.errors });
-    const event = this.repo.replace(id, v.value);
+    const event = await this.repo.replace(id, v.value);
     return event ? { ok: true, value: event } : fail({ kind: "not-found" });
   }
 
-  // Merges into the event as it is NOW (no lost update), then validates the result.
-  patch(actor: Actor, id: number, input: unknown): Outcome<EventItem> {
-    const auth = this.authorizeEdit(actor, id);
+  // Merges into the event as read just before the write, then validates the result.
+  // Unlike the old synchronous store, a concurrent change between read and write can
+  // be overwritten (documented in ADR-011; row locking is a later lecture).
+  async patch(actor: Actor, id: number, input: unknown): Promise<Outcome<EventItem>> {
+    const auth = await this.authorizeEdit(actor, id);
     if (!auth.ok) return auth;
     const v = validateEventPatch(input, auth.value);
     if (!v.ok) return fail({ kind: "invalid", errors: v.errors });
-    const event = this.repo.replace(id, v.value);
+    const event = await this.repo.replace(id, v.value);
     return event ? { ok: true, value: event } : fail({ kind: "not-found" });
   }
 
   // Existing contract: 404 is decided before the admin-only permission check.
-  remove(actor: Actor, id: number): Outcome<true> {
-    if (!this.repo.findById(id)) return fail({ kind: "not-found" });
+  async remove(actor: Actor, id: number): Promise<Outcome<true>> {
+    if (!(await this.repo.findById(id))) return fail({ kind: "not-found" });
     if (actor.role !== "admin") return fail({ kind: "forbidden" });
-    return this.repo.remove(id) ? { ok: true, value: true } : fail({ kind: "not-found" });
+    return (await this.repo.remove(id)) ? { ok: true, value: true } : fail({ kind: "not-found" });
   }
 }
