@@ -1,8 +1,11 @@
 import { after, before, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { events } from "../src/server.ts";
+import { auth } from "../src/server.ts";
 import type { EventItem } from "../src/server.ts";
-import { AuthService, auth, eventOwners, ticketsByUser, verifyPassword } from "../src/auth.ts";
+import { AuthService, ticketsByUser, verifyPassword } from "../src/auth.ts";
+import { pool } from "../src/db/pool.ts";
+import { PgUserRepository } from "../src/modules/auth/user-repository.ts";
+import { dbEvents, dbOwnerOf, resetEvents, SEED } from "./db.ts";
 import { useServer, userToken } from "./helpers.ts";
 
 const api = useServer({ asAdmin: false });
@@ -14,8 +17,8 @@ const uname = () => `user_${process.pid}_${n++}`;
 const PW = "correct horse battery";
 
 let seed: EventItem[] = [];
-before(() => { seed = structuredClone(events); });
-beforeEach(() => { events.splice(0, events.length, ...structuredClone(seed)); eventOwners.clear(); });
+before(() => { seed = structuredClone(SEED); });
+beforeEach(async () => { await resetEvents(seed); });
 after(() => { auth.now = Date.now; });
 
 const post = (path: string, body: unknown, headers: Record<string, string> = J) =>
@@ -39,7 +42,7 @@ test("same password, two users: distinct salted hashes, both verify", async () =
   await post("/auth/register", { username: a, password: PW });
   await post("/auth/register", { username: b, password: PW });
   const find = async (name: string) => {
-    for (let id = 1; id < 1000; id++) { const u = auth.userById(id); if (u?.username === name) return u; }
+    for (let id = 1; id < 1000; id++) { const u = await auth.userById(id); if (u?.username === name) return u; }
     throw new Error("missing");
   };
   const ua = await find(a), ub = await find(b);
@@ -115,7 +118,7 @@ test("missing, malformed, tampered and unknown tokens are 401 with a challenge; 
     assert.match(res.headers.get("www-authenticate") ?? "", /^Bearer/, name);
   }
   assert.equal((await fetch(v1("/auth/me"))).status, 401);
-  assert.equal(events.length, seed.length);
+  assert.equal((await dbEvents()).length, seed.length);
 });
 
 test("expired session is 401 (controlled clock) and is removed", async () => {
@@ -143,12 +146,12 @@ test("logout revokes server-side; replaying the old token is 401; other sessions
 });
 
 test("sessions live in one instance's memory: a new instance (restart) or another instance rejects them", async () => {
-  const a = new AuthService();
+  const a = new AuthService(new PgUserRepository(pool));
   const created = await a.createUser(uname(), PW);
   assert.ok(created.ok);
   const { token } = a.createSession(created.user.id);
-  assert.ok(a.authenticate(token));
-  assert.equal(new AuthService().authenticate(token), null);
+  assert.ok(await a.authenticate(token));
+  assert.equal(await new AuthService(new PgUserRepository(pool)).authenticate(token), null);
 });
 
 // ---------- authorization ----------
@@ -160,7 +163,7 @@ test("attendee cannot create/replace/patch/delete events (403, no change)", asyn
   assert.equal((await fetch(v1("/events/1"), { method: "PUT", headers: h, body: b })).status, 403);
   assert.equal((await fetch(v1("/events/1"), { method: "PATCH", headers: h, body: b })).status, 403);
   assert.equal((await fetch(v1("/events/1"), { method: "DELETE", headers: as(token) })).status, 403);
-  assert.deepEqual(events, seed);
+  assert.deepEqual(await dbEvents(), seed);
 });
 
 test("organizer owns what they create; another organizer is 403; admin can edit; DELETE is admin-only", async () => {
@@ -170,7 +173,7 @@ test("organizer owns what they create; another organizer is 403; admin can edit;
   const created = await mkEvent(o1.token);
   assert.equal(created.status, 201);
   const { id } = (await created.json()) as EventItem;
-  assert.equal(eventOwners.get(id), o1.id);
+  assert.equal(await dbOwnerOf(id), o1.id);
 
   const patch = (t: string) => fetch(v1(`/events/${id}`), { method: "PATCH", headers: as(t, J), body: '{"seats":9}' });
   assert.equal((await patch(o1.token)).status, 200);
@@ -189,7 +192,7 @@ test("client-supplied owner/role fields cannot override server-side ownership", 
   const o2 = await userToken(api.base, "organizer");
   const res = await post("/events", { name: "Mine", seats: 1, ownerId: o2.id, role: "admin" }, as(o1.token, J));
   const { id } = (await res.json()) as EventItem;
-  assert.equal(eventOwners.get(id), o1.id);
+  assert.equal(await dbOwnerOf(id), o1.id);
 });
 
 test("legacy unversioned mutations are protected too (no bypass); reads stay public", async () => {
@@ -202,7 +205,7 @@ test("legacy unversioned mutations are protected too (no bypass); reads stay pub
 test("role changes apply immediately: a demoted organizer is refused on the next request", async () => {
   const o = await userToken(api.base, "organizer");
   assert.equal((await mkEvent(o.token)).status, 201);
-  auth.setRole(o.id, "attendee");
+  await auth.setRole(o.id, "attendee");
   assert.equal((await mkEvent(o.token)).status, 403); // same token, current role read from the store
 });
 

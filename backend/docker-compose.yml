@@ -1,0 +1,17 @@
+# Local development PostgreSQL only (lecture 12). Never use for production.
+# Credentials come from the environment (see .env.example); nothing is committed.
+services:
+  postgres:
+    image: postgres:17
+    container_name: eventhub-pg
+    network_mode: bridge
+    environment:
+      POSTGRES_USER: eventhub
+      POSTGRES_PASSWORD: ${EVENTHUB_PG_PASSWORD:?set EVENTHUB_PG_PASSWORD in backend/.env}
+      POSTGRES_DB: eventhub_dev
+    ports:
+      - "127.0.0.1:56432:5432"
+    volumes:
+      - eventhub_pgdata:/var/lib/postgresql/data
+volumes:
+  eventhub_pgdata:

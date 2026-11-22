@@ -3,13 +3,18 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
-    "start": "tsx src/server.ts",
-    "test": "tsx --test test/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "dev": "tsx watch --env-file-if-exists=.env src/server.ts",
+    "start": "tsx --env-file-if-exists=.env src/server.ts",
+    "test": "tsx --env-file-if-exists=.env --import ./test/setup.ts --test --test-concurrency=1 test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "migrate": "tsx --env-file-if-exists=.env src/db/migrate.ts",
+    "seed": "tsx --env-file-if-exists=.env src/db/seed.ts",
+    "db:up": "docker compose --env-file .env up -d",
+    "experiment:explain": "tsx --env-file-if-exists=.env experiments/explain-events.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/pg": "^8.23.1",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
   },
@@ -17,6 +22,7 @@
     "esbuild": false
   },
   "dependencies": {
-    "jose": "^6.2.18"
+    "jose": "^6.2.18",
+    "pg": "^8.23.1"
   }
 }

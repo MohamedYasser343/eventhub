@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { events } from "../src/server.ts";
+import { pool } from "../src/db/pool.ts";
+import { dbEvents, resetEvents, SEED } from "./db.ts";
 import { useServer } from "./helpers.ts";
 
 const api = useServer();
@@ -9,24 +10,24 @@ test("GET /events returns 200 with the JSON list", async () => {
   const res = await fetch(`${api.base}/events`);
   assert.equal(res.status, 200);
   assert.match(res.headers.get("content-type") ?? "", /^application\/json/);
-  assert.deepEqual(await res.json(), events);
+  assert.deepEqual(await res.json(), await dbEvents());
 });
 
 test("GET /events does not mutate the collection", async () => {
-  const before = JSON.stringify(events);
+  const before = JSON.stringify(await dbEvents());
   await fetch(`${api.base}/events`);
   await fetch(`${api.base}/events`);
-  assert.equal(JSON.stringify(events), before);
+  assert.equal(JSON.stringify(await dbEvents()), before);
 });
 
 test("GET /events on an empty collection returns []", async () => {
-  const saved = events.splice(0, events.length);
+  await pool.query("TRUNCATE events");
   try {
     const res = await fetch(`${api.base}/events`);
     assert.equal(res.status, 200);
     assert.deepEqual(await res.json(), []);
   } finally {
-    events.push(...saved);
+    await resetEvents(SEED);
   }
 });
 

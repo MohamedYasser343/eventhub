@@ -1,8 +1,9 @@
 import { before, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
-import { events, server } from "../src/server.ts";
+import { server } from "../src/server.ts";
 import type { EventItem } from "../src/server.ts";
+import { dbEvents, resetEvents, SEED } from "./db.ts";
 import { useServer } from "./helpers.ts";
 
 const api = useServer();
@@ -10,11 +11,11 @@ const api = useServer();
 let seed: EventItem[] = [];
 
 before(() => {
-  seed = structuredClone(events);
+  seed = structuredClone(SEED);
 });
 
-beforeEach(() => {
-  events.splice(0, events.length, ...structuredClone(seed));
+beforeEach(async () => {
+  await resetEvents(seed);
 });
 
 function put(path: string, body: string, contentType: string | null = "application/json") {
@@ -23,7 +24,7 @@ function put(path: string, body: string, contentType: string | null = "applicati
   return fetch(`${api.base}${path}`, { method: "PUT", headers, body });
 }
 
-const snapshot = () => JSON.stringify(events);
+const snapshot = async () => JSON.stringify(await dbEvents());
 
 // ---------- PUT ----------
 
@@ -35,18 +36,18 @@ test("PUT replaces an existing event and returns 200 with it", async () => {
 
   const fetched = await fetch(`${api.base}/events/1`);
   assert.deepEqual(await fetched.json(), { id: 1, name: "Renamed", seats: 7 });
-  assert.deepEqual(events.find((e) => e.id === 2), seed.find((e) => e.id === 2));
-  assert.equal(events.length, seed.length);
+  assert.deepEqual((await dbEvents()).find((e) => e.id === 2), seed.find((e) => e.id === 2));
+  assert.equal((await dbEvents()).length, seed.length);
 });
 
 test("repeating an identical PUT leaves the same state (idempotent)", async () => {
   const body = JSON.stringify({ name: "Same", seats: 5 });
   const first = await put("/events/1", body);
-  const afterFirst = snapshot();
+  const afterFirst = await snapshot();
   const second = await put("/events/1", body);
   assert.equal(first.status, 200);
   assert.equal(second.status, 200);
-  assert.equal(snapshot(), afterFirst);
+  assert.equal(await snapshot(), afterFirst);
   assert.deepEqual(await first.json(), await second.json());
 });
 
@@ -54,13 +55,13 @@ test("PUT ignores an id in the body and trims the name", async () => {
   const res = await put("/events/1", JSON.stringify({ id: 5, name: "  Pad  ", seats: 1 }));
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), { id: 1, name: "Pad", seats: 1 });
-  assert.ok(!events.some((e) => e.id === 5));
+  assert.ok(!(await dbEvents()).some((e) => e.id === 5));
 });
 
 test("PUT on a missing event returns 404 and creates nothing", async () => {
   const res = await put("/events/999", JSON.stringify({ name: "Ghost", seats: 1 }));
   assert.equal(res.status, 404);
-  assert.equal(snapshot(), JSON.stringify(seed));
+  assert.equal(await snapshot(), JSON.stringify(seed));
 });
 
 test("PUT checks existence before the body (404 even for invalid body)", async () => {
@@ -74,14 +75,14 @@ test("PUT with invalid data returns 422 without mutation", async () => {
     const res = await put("/events/1", JSON.stringify(body));
     assert.equal(res.status, 422, JSON.stringify(body));
   }
-  assert.equal(snapshot(), JSON.stringify(seed));
+  assert.equal(await snapshot(), JSON.stringify(seed));
 });
 
 test("PUT with malformed JSON, wrong Content-Type or huge body is rejected without mutation", async () => {
   assert.equal((await put("/events/1", "{")).status, 400);
   assert.equal((await put("/events/1", JSON.stringify({ name: "A", seats: 1 }), "text/plain")).status, 415);
   assert.equal((await put("/events/1", JSON.stringify({ name: "A", seats: 1, pad: "x".repeat(20000) }))).status, 413);
-  assert.equal(snapshot(), JSON.stringify(seed));
+  assert.equal(await snapshot(), JSON.stringify(seed));
 });
 
 // The handler checks the event exists, waits for the body, then looks it up
@@ -112,8 +113,8 @@ test("PUT returns 404 if the event is deleted while its body is still arriving",
     req.write(body.slice(0, 10));
   });
   assert.equal(status, 404);
-  assert.ok(!events.some((e) => e.id === 1));
-  assert.equal(events.length, seed.length - 1);
+  assert.ok(!(await dbEvents()).some((e) => e.id === 1));
+  assert.equal((await dbEvents()).length, seed.length - 1);
 });
 
 // ---------- DELETE ----------
@@ -123,22 +124,22 @@ test("DELETE removes the event and returns 204 with no body", async () => {
   assert.equal(res.status, 204);
   assert.equal(await res.text(), "");
   assert.equal(res.headers.get("content-type"), null);
-  assert.ok(!events.some((e) => e.id === 1));
+  assert.ok(!(await dbEvents()).some((e) => e.id === 1));
   assert.equal((await fetch(`${api.base}/events/1`)).status, 404);
-  assert.equal(events.length, seed.length - 1);
+  assert.equal((await dbEvents()).length, seed.length - 1);
 });
 
 test("repeated DELETE: 204 then 404, resource stays absent", async () => {
   assert.equal((await fetch(`${api.base}/events/1`, { method: "DELETE" })).status, 204);
-  const afterFirst = snapshot();
+  const afterFirst = await snapshot();
   assert.equal((await fetch(`${api.base}/events/1`, { method: "DELETE" })).status, 404);
-  assert.equal(snapshot(), afterFirst);
+  assert.equal(await snapshot(), afterFirst);
 });
 
 test("DELETE on a missing event returns 404 and changes nothing", async () => {
   const res = await fetch(`${api.base}/events/999`, { method: "DELETE" });
   assert.equal(res.status, 404);
-  assert.equal(snapshot(), JSON.stringify(seed));
+  assert.equal(await snapshot(), JSON.stringify(seed));
 });
 
 test("DELETE ignores any request body", async () => {
@@ -148,7 +149,7 @@ test("DELETE ignores any request body", async () => {
     body: "ignored",
   });
   assert.equal(res.status, 204);
-  assert.ok(!events.some((e) => e.id === 1));
+  assert.ok(!(await dbEvents()).some((e) => e.id === 1));
 });
 
 test("DELETE with non-canonical ids returns 404 and deletes nothing", async () => {
@@ -156,7 +157,7 @@ test("DELETE with non-canonical ids returns 404 and deletes nothing", async () =
     const res = await fetch(`${api.base}/events/${bad}`, { method: "DELETE" });
     assert.equal(res.status, 404, bad);
   }
-  assert.equal(snapshot(), JSON.stringify(seed));
+  assert.equal(await snapshot(), JSON.stringify(seed));
 });
 
 test("a deleted id is not reused by a later POST", async () => {

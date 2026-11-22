@@ -2,17 +2,17 @@ import { before, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { request } from "node:http";
 import { gzipSync } from "node:zlib";
-import { events } from "../src/server.ts";
 import type { EventItem } from "../src/server.ts";
+import { dbEvents, resetEvents, SEED } from "./db.ts";
 import { useServer } from "./helpers.ts";
 
 const api = useServer();
 let seed: EventItem[] = [];
 before(() => {
-  seed = structuredClone(events);
+  seed = structuredClone(SEED);
 });
-beforeEach(() => {
-  events.splice(0, events.length, ...structuredClone(seed));
+beforeEach(async () => {
+  await resetEvents(seed);
 });
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
@@ -76,7 +76,7 @@ test("invalid UTF-8 is rejected with 400, never repaired to U+FFFD", async () =>
   const bad = Buffer.concat([Buffer.from('{"name":"'), Buffer.from([0xff, 0xfe]), Buffer.from('","seats":1}')]);
   const res = await post(bad);
   assert.equal(res.status, 400);
-  assert.equal(events.length, seed.length);
+  assert.equal((await dbEvents()).length, seed.length);
 });
 
 test("a UTF-8 BOM is rejected (400)", async () => {
@@ -94,7 +94,7 @@ test("Content-Encoding gzip is 415; the compressed bytes are never parsed", asyn
   const gz = gzipSync(JSON.stringify({ name: "Zipped", seats: 1 }));
   const res = await post(gz, { ...JSON_HEADERS, "Content-Encoding": "gzip" });
   assert.equal(res.status, 415);
-  assert.equal(events.length, seed.length);
+  assert.equal((await dbEvents()).length, seed.length);
 });
 
 test("empty body is 400; null, array and primitives are valid JSON but 422", async () => {
@@ -103,13 +103,13 @@ test("empty body is 400; null, array and primitives are valid JSON but 422", asy
     const res = await post(body);
     assert.equal(res.status, 422, body);
   }
-  assert.equal(events.length, seed.length);
+  assert.equal((await dbEvents()).length, seed.length);
 });
 
 test("wrong field types are 422 (numeric string seats), syntax errors 400, no mutation", async () => {
   assert.equal((await post('{"name":"M","seats":"30"}')).status, 422);
   assert.equal((await post('{"name":"M",}')).status, 400);
-  assert.equal(events.length, seed.length);
+  assert.equal((await dbEvents()).length, seed.length);
 });
 
 test("body of exactly 16384 bytes is accepted, 16385 is 413", async () => {
@@ -140,7 +140,7 @@ test("a client that aborts mid-body does not hang or mutate; server keeps servin
     setTimeout(() => req.destroy(), 50);
   });
   await new Promise((r) => setTimeout(r, 50));
-  assert.equal(events.length, seed.length);
+  assert.equal((await dbEvents()).length, seed.length);
   assert.equal((await fetch(`${api.base}/health`)).status, 200);
 });
 
@@ -150,7 +150,7 @@ test("extra and internal fields are neither persisted nor returned", async () =>
   const created = (await res.json()) as EventItem;
   assert.deepEqual(Object.keys(created).sort(), ["id", "name", "seats"]);
   assert.notEqual(created.id, 999);
-  assert.deepEqual(Object.keys(events[events.length - 1] ?? {}).sort(), ["id", "name", "seats"]);
+  assert.deepEqual(Object.keys((await dbEvents()).at(-1) ?? {}).sort(), ["id", "name", "seats"]);
 });
 
 test("PUT keeps the same boundary: bad UTF-8 is 400 and does not change the event", async () => {
@@ -160,5 +160,5 @@ test("PUT keeps the same boundary: bad UTF-8 is 400 and does not change the even
     body: Buffer.from([0x7b, 0xff, 0x7d]),
   });
   assert.equal(res.status, 400);
-  assert.deepEqual(events[0], seed[0]);
+  assert.deepEqual((await dbEvents())[0], seed[0]);
 });

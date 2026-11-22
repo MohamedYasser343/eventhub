@@ -1,9 +1,10 @@
 import { randomBytes, scrypt, timingSafeEqual, createHash } from "node:crypto";
+import type { UserRepository } from "./modules/auth/user-repository.ts";
 
-// Lecture 08 lab: in-memory users, scrypt password hashing, opaque server-side
-// sessions (Bearer transport) and a login rate limiter. Synthetic data only;
-// nothing here is persisted, so a restart forgets every user and session.
-// Not production-ready: see ADR-007 for what a real deployment still needs.
+// Lecture 08 lab: scrypt password hashing, opaque server-side sessions (Bearer
+// transport) and a login rate limiter. Since lecture 12 users live in PostgreSQL
+// (UserRepository); sessions and the limiter are still in memory, so a restart
+// logs everyone out. Not production-ready: see ADR-007 and ADR-011.
 
 export type Role = "attendee" | "organizer" | "admin";
 export interface User {
@@ -78,37 +79,30 @@ export type Registration =
 export class AuthService {
   now: () => number = Date.now; // injectable clock for expiry tests
   sessionTtlMs = 15 * 60_000;
-  private users = new Map<string, User>(); // key: lower-case username
-  private byId = new Map<number, User>();
   private sessions = new Map<string, { userId: number; expiresAt: number }>(); // key: sha256(token)
-  private nextUserId = 1;
   private dummyHash: Promise<string> = hashPassword("dummy-password-for-timing");
   readonly limiter = new LoginLimiter(() => this.now());
 
+  constructor(private readonly users: UserRepository) {}
+
   // Trusted path (startup seed, tests). There is deliberately no HTTP route to set a role.
+  // The database's unique index decides duplicates, so concurrent registrations are safe.
   async createUser(username: string, password: string, role: Role = "attendee"): Promise<Registration> {
-    const key = username.toLowerCase();
-    if (this.users.has(key)) return { ok: false, reason: "duplicate" };
-    const user: User = { id: this.nextUserId++, username, role, passwordHash: await hashPassword(password) };
-    // Re-check: a concurrent registration may have won while hashing.
-    if (this.users.has(key)) return { ok: false, reason: "duplicate" };
-    this.users.set(key, user);
-    this.byId.set(user.id, user);
-    return { ok: true, user };
+    const user = await this.users.create(username, await hashPassword(password), role);
+    return user ? { ok: true, user } : { ok: false, reason: "duplicate" };
   }
 
-  userById(id: number): User | undefined {
-    return this.byId.get(id);
+  userById(id: number): Promise<User | undefined> {
+    return this.users.findById(id);
   }
 
-  setRole(id: number, role: Role): void {
-    const u = this.byId.get(id);
-    if (u) u.role = role;
+  setRole(id: number, role: Role): Promise<void> {
+    return this.users.setRole(id, role);
   }
 
   // Always does one scrypt run, so an unknown user costs the same as a wrong password.
   async verifyCredentials(username: string, password: string): Promise<User | null> {
-    const user = this.users.get(username.toLowerCase());
+    const user = await this.users.findByUsername(username);
     const ok = await verifyPassword(password, user ? user.passwordHash : await this.dummyHash);
     return user && ok ? user : null;
   }
@@ -123,7 +117,7 @@ export class AuthService {
   }
 
   // Role is read from the user store on every request (trusted, never from the client).
-  authenticate(token: string): User | null {
+  async authenticate(token: string): Promise<User | null> {
     const key = sha(token);
     const s = this.sessions.get(key);
     if (!s) return null;
@@ -131,7 +125,7 @@ export class AuthService {
       this.sessions.delete(key);
       return null;
     }
-    return this.byId.get(s.userId) ?? null;
+    return (await this.users.findById(s.userId)) ?? null;
   }
 
   destroySession(token: string): void {
@@ -141,9 +135,5 @@ export class AuthService {
 
 const sha = (t: string) => createHash("sha256").update(t).digest("hex");
 
-export const auth = new AuthService();
-
-// ownership: event id -> owner user id (kept out of the event representation)
-export const eventOwners = new Map<number, number>();
 // synthetic private resource for the "own tickets only" demonstration
 export const ticketsByUser = new Map<number, { ticketId: string; eventId: number }[]>();

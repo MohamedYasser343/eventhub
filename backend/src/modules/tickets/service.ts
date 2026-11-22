@@ -19,8 +19,8 @@ export class TicketService {
 
   // Synthetic tickets derived from the event; nothing is reserved or stored.
   // undefined when the event does not exist.
-  forEvent(eventId: number): { ticketId: string; eventId: number; type: "general" }[] | undefined {
-    const event = this.events.get(eventId);
+  async forEvent(eventId: number): Promise<{ ticketId: string; eventId: number; type: "general" }[] | undefined> {
+    const event = await this.events.get(eventId);
     if (!event) return undefined;
     return Array.from({ length: Math.min(event.seats, 3) }, (_, i) => ({
       ticketId: `T-${eventId}-${i + 1}`,

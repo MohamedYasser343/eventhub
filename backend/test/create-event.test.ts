@@ -1,7 +1,8 @@
 import { before, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { events } from "../src/server.ts";
 import type { EventItem } from "../src/server.ts";
+import { pool } from "../src/db/pool.ts";
+import { dbEvents, resetEvents, SEED } from "./db.ts";
 import { useServer } from "./helpers.ts";
 
 const api = useServer();
@@ -9,11 +10,11 @@ const api = useServer();
 let seed: EventItem[] = [];
 
 before(() => {
-  seed = structuredClone(events);
+  seed = structuredClone(SEED);
 });
 
-beforeEach(() => {
-  events.splice(0, events.length, ...structuredClone(seed));
+beforeEach(async () => {
+  await resetEvents(seed);
 });
 
 function post(body: string, contentType: string | null = "application/json") {
@@ -28,7 +29,7 @@ test("valid POST returns 201, Location, JSON body and stores the event", async (
   const created = (await res.json()) as EventItem;
   assert.equal(res.headers.get("location"), `/events/${created.id}`);
   assert.deepEqual(created, { id: created.id, name: "Synthetic Concert", seats: 50 });
-  assert.equal(events.length, seed.length + 1);
+  assert.equal((await dbEvents()).length, seed.length + 1);
 
   const fetched = await fetch(`${api.base}/events/${created.id}`);
   assert.equal(fetched.status, 200);
@@ -40,7 +41,7 @@ test("repeating the same POST creates distinct events (not idempotent)", async (
   const a = (await (await post(payload)).json()) as EventItem;
   const b = (await (await post(payload)).json()) as EventItem;
   assert.notEqual(a.id, b.id);
-  assert.equal(events.length, seed.length + 2);
+  assert.equal((await dbEvents()).length, seed.length + 2);
 });
 
 test("name is trimmed, extra fields (including id) are ignored", async () => {
@@ -54,7 +55,7 @@ test("name is trimmed, extra fields (including id) are ignored", async () => {
 
 test("ids are not reused after the last event is removed", async () => {
   const a = (await (await post(JSON.stringify({ name: "A", seats: 1 }))).json()) as EventItem;
-  events.pop();
+  await pool.query("DELETE FROM events WHERE id = $1", [a.id]); // sequences never hand an id out twice
   const b = (await (await post(JSON.stringify({ name: "B", seats: 1 }))).json()) as EventItem;
   assert.ok(b.id > a.id);
 });
@@ -70,7 +71,7 @@ test("unsupported or missing Content-Type returns 415 without mutation", async (
     // fetch sets text/plain for string bodies when no header is given
     assert.equal(res.status, 415, String(ct));
   }
-  assert.equal(events.length, seed.length);
+  assert.equal((await dbEvents()).length, seed.length);
 });
 
 test("Content-Type parameters and casing are accepted", async () => {
@@ -83,7 +84,7 @@ test("malformed JSON returns 400 without mutation", async () => {
     const res = await post(body);
     assert.equal(res.status, 400, body);
   }
-  assert.equal(events.length, seed.length);
+  assert.equal((await dbEvents()).length, seed.length);
 });
 
 test("valid JSON with invalid data returns 422 without mutation", async () => {
@@ -111,13 +112,13 @@ test("valid JSON with invalid data returns 422 without mutation", async () => {
     const json = (await res.json()) as { details: string[] };
     assert.ok(json.details.length > 0);
   }
-  assert.equal(events.length, seed.length);
+  assert.equal((await dbEvents()).length, seed.length);
 });
 
 test("body over 16 KB returns 413 (declared length) without mutation", async () => {
   const res = await post(JSON.stringify({ name: "A", seats: 1, pad: "x".repeat(20000) }));
   assert.equal(res.status, 413);
-  assert.equal(events.length, seed.length);
+  assert.equal((await dbEvents()).length, seed.length);
 });
 
 test("body over 16 KB returns 413 when streamed without Content-Length", async () => {
@@ -136,7 +137,7 @@ test("body over 16 KB returns 413 when streamed without Content-Length", async (
     duplex: "half",
   });
   assert.equal(res.status, 413);
-  assert.equal(events.length, seed.length);
+  assert.equal((await dbEvents()).length, seed.length);
 });
 
 test("PUT /events still returns 405 with Allow: GET, POST", async () => {

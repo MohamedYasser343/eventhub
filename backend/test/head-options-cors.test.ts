@@ -2,7 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
-import { events, server } from "../src/server.ts";
+import { server } from "../src/server.ts";
+import { pool } from "../src/db/pool.ts";
+import { dbEvents, resetEvents, SEED } from "./db.ts";
 import { useServer } from "./helpers.ts";
 
 const api = useServer();
@@ -163,7 +165,7 @@ test("If-None-Match: lists, weak form and * are matched; other values are not", 
 });
 
 test("after the event changes the old validator no longer matches", async () => {
-  const original = structuredClone(events.find((e) => e.id === 1)!);
+  const original = structuredClone((await dbEvents()).find((e) => e.id === 1)!);
   try {
     const etag = (await fetch(`${api.base}/events/1`)).headers.get("etag")!;
     const put = await fetch(`${api.base}/events/1`, {
@@ -182,8 +184,7 @@ test("after the event changes the old validator no longer matches", async () => 
     const cond = await fetch(`${api.base}/events/1`, { headers: { "If-None-Match": newEtag! } });
     assert.equal(cond.status, 304);
   } finally {
-    const index = events.findIndex((e) => e.id === 1);
-    events[index] = original;
+    await pool.query("UPDATE events SET name = $2, seats = $3 WHERE id = $1", [1, original.name, original.seats]);
   }
 });
 

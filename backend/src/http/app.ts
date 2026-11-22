@@ -96,7 +96,7 @@ function bearerToken(req: IncomingMessage): string | null {
 export function createProtect(sessions: Pick<AuthService, "authenticate">): (h: AuthedHandler) => AppHandler {
   const requireAuth: Middleware<RouteContext> = async (req, res, ctx, next) => {
     const token = bearerToken(req);
-    const user = token ? sessions.authenticate(token) : null;
+    const user = token ? await sessions.authenticate(token) : null;
     if (!token || !user) {
       const challenge = req.headers.authorization === undefined ? "Bearer" : 'Bearer error="invalid_token"';
       sendJson(res, 401, { error: "Unauthorized" }, { "WWW-Authenticate": challenge, ...ignoredBodyHeaders(req) });

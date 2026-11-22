@@ -13,8 +13,8 @@ export function createTicketsController(tickets: TicketService) {
       if (!ticket) return notFound(res, NO_STORE);
       sendJson(res, 200, ticket, NO_STORE);
     },
-    forEvent(_req: IncomingMessage, res: ServerResponse, ctx: RouteContext): void {
-      const data = tickets.forEvent(idOf(ctx));
+    async forEvent(_req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
+      const data = await tickets.forEvent(idOf(ctx));
       if (!data) return notFound(res);
       sendJson(res, 200, { data });
     },

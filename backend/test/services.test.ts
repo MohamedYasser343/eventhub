@@ -1,6 +1,9 @@
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { AuthService } from "../src/auth.ts";
+import { pool } from "../src/db/pool.ts";
+import { PgUserRepository } from "../src/modules/auth/user-repository.ts";
+import { resetAll } from "./db.ts";
 import { AccountService } from "../src/modules/auth/service.ts";
 import { TicketService } from "../src/modules/tickets/service.ts";
 import type { Ticket, TicketRepository } from "../src/modules/tickets/repository.ts";
@@ -8,20 +11,22 @@ import type { Ticket, TicketRepository } from "../src/modules/tickets/repository
 // Services tested directly: no HTTP server, no request/response objects.
 
 const PW = "correct-horse-battery";
-const fresh = () => {
-  const auth = new AuthService();
+// Fresh = empty users table plus a new AuthService (new empty session store).
+const fresh = async () => {
+  await resetAll();
+  const auth = new AuthService(new PgUserRepository(pool));
   return { auth, accounts: new AccountService(auth) };
 };
 
 test("accounts: register ignores a client-supplied role (always attendee)", async () => {
-  const { accounts } = fresh();
+  const { accounts } = await fresh();
   const r = await accounts.register({ username: "alice_1", password: PW, role: "admin" });
   assert.equal(r.ok && r.user.role, "attendee");
   assert.equal(r.ok && "passwordHash" in r.user, false);
 });
 
 test("accounts: register rejects bad input and duplicates", async () => {
-  const { accounts } = fresh();
+  const { accounts } = await fresh();
   const bad = await accounts.register({ username: "a", password: "short" });
   assert.equal(!bad.ok && bad.kind === "invalid" && bad.details.length, 2);
   assert.equal((await accounts.register("not an object")).ok, false);
@@ -31,7 +36,7 @@ test("accounts: register rejects bad input and duplicates", async () => {
 });
 
 test("accounts: login success, same outcome for unknown user and wrong password", async () => {
-  const { accounts } = fresh();
+  const { accounts } = await fresh();
   await accounts.register({ username: "carol_1", password: PW });
   const ok = await accounts.login({ username: "carol_1", password: PW }, "1.2.3.4");
   assert.equal(ok.ok && ok.user.username, "carol_1");
@@ -42,7 +47,7 @@ test("accounts: login success, same outcome for unknown user and wrong password"
 });
 
 test("accounts: repeated failures are rate limited, then logout kills the session", async () => {
-  const { auth, accounts } = fresh();
+  const { auth, accounts } = await fresh();
   await accounts.register({ username: "dave_1", password: PW });
   for (let i = 0; i < 5; i++) await accounts.login({ username: "dave_1", password: "wrong-wrong-wrong" }, "9.9.9.9");
   const limited = await accounts.login({ username: "dave_1", password: PW }, "9.9.9.9");
@@ -51,16 +56,16 @@ test("accounts: repeated failures are rate limited, then logout kills the sessio
   const other = await accounts.login({ username: "dave_1", password: PW }, "8.8.8.8");
   assert.equal(other.ok, true);
   if (!other.ok) return;
-  assert.ok(auth.authenticate(other.token));
+  assert.ok(await auth.authenticate(other.token));
   accounts.logout(other.token);
-  assert.equal(auth.authenticate(other.token), null);
+  assert.equal(await auth.authenticate(other.token), null);
 });
 
 class FakeTickets implements TicketRepository {
   data = new Map<number, Ticket[]>([[1, [{ ticketId: "T-1-1", eventId: 1 }]], [2, [{ ticketId: "T-9-1", eventId: 9 }]]]);
   findByUser(id: number) { return this.data.get(id) ?? []; }
 }
-const events = { get: (id: number) => (id === 1 ? { id: 1, name: "E", seats: 2 } : id === 2 ? { id: 2, name: "F", seats: 50 } : undefined) };
+const events = { get: async (id: number) => (id === 1 ? { id: 1, name: "E", seats: 2 } : id === 2 ? { id: 2, name: "F", seats: 50 } : undefined) };
 
 test("tickets: only own tickets; others' look missing", () => {
   const svc = new TicketService(new FakeTickets(), events);
@@ -70,9 +75,11 @@ test("tickets: only own tickets; others' look missing", () => {
   assert.equal(svc.ownedById(1, "T-9-1"), undefined);
 });
 
-test("tickets: synthetic event tickets capped at 3; unknown event is undefined", () => {
+test("tickets: synthetic event tickets capped at 3; unknown event is undefined", async () => {
   const svc = new TicketService(new FakeTickets(), events);
-  assert.equal(svc.forEvent(1)?.length, 2);
-  assert.equal(svc.forEvent(2)?.length, 3);
-  assert.equal(svc.forEvent(77), undefined);
+  assert.equal((await svc.forEvent(1))?.length, 2);
+  assert.equal((await svc.forEvent(2))?.length, 3);
+  assert.equal(await svc.forEvent(77), undefined);
 });
+
+after(() => pool.end());
