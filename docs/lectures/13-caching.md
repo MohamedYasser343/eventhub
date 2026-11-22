@@ -5,7 +5,7 @@
 - **Playlist position:** 13 (numbered title corroborated by course-specific independent notes; live playlist index not independently checked)
 - **Documented:** 2026-11-22
 - **Learning status:** Complete — owner explicitly requested uploading this lecture discussion to GitHub.
-- **Implementation status:** Not started. This documentation does not authorize implementation.
+- **Implementation status:** Complete (owner confirmed 2026-11-22); see the implementation evidence section.
 - **Source limitations:** The discussion used lecture-identifying metadata and independent, transcript-derived notes describing the video's sections. The original full recording/transcript was **not independently watched or verified end-to-end** during this session. The real-world descriptions below represent the lecture's educational examples, not audited internal designs of those companies. Engineering additions are labeled **Supplementary**. No EventHub code, tests, timings, or benchmarks were run for this documentation update.
 
 ## Learning objectives
@@ -334,7 +334,7 @@ Introduce an **optional cache for public event-detail reads**, then demonstrate 
 
 ## Implementation evidence (coding agent)
 
-Status: implemented on branch `feat/lecture-13-caching`; **awaiting owner confirmation** (not marked complete). Decision record: [ADR-012](../decisions/012-public-event-cache.md). Note: the assignment's "lecture 12 not started" prerequisite line is stale; lecture 12 was completed and merged (PR #10), so the real PostgreSQL-backed path was used.
+Status: implemented on branch `feat/lecture-13-caching`; **owner confirmed completion on 2026-11-22**. Decision record: [ADR-012](../decisions/012-public-event-cache.md). Note: the assignment's "lecture 12 not started" prerequisite line is stale; lecture 12 was completed and merged (PR #10), so the real PostgreSQL-backed path was used.
 
 **What changed**
 - `src/cache.ts`: `Cache` interface, `RedisCache` (100 ms timeout, no offline queue, background reconnect, error listener), `noCache`, TTL validation.
@@ -358,4 +358,4 @@ Status: implemented on branch `feat/lecture-13-caching`; **awaiting owner confir
 - [x] Implementation/experiment performed and changes linked.
 - [x] Environment, commands and actual observed results recorded.
 - [x] Negative cases, authorization checks and prior regressions demonstrated.
-- [ ] Owner confirms implementation completion and progress tracker updated independently.
+- [x] Owner confirmed implementation completion (2026-11-22) and progress tracker updated independently.

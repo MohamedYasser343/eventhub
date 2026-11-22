@@ -1,6 +1,6 @@
 # ADR-012: Redis cache-aside for the public event detail
 
-Status: Proposed (awaiting owner confirmation)
+Status: Accepted (owner confirmed 2026-11-22)
 Date: 2026-11-22
 Related lecture: [13 - Caching, the Secret Behind It All](../lectures/13-caching.md)
 
