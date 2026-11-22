@@ -13,5 +13,15 @@ services:
       - "127.0.0.1:56432:5432"
     volumes:
       - eventhub_pgdata:/var/lib/postgresql/data
+  # Lecture 13: disposable cache. No persistence on purpose (a cache may be empty at
+  # any time) and a small memory cap with LRU eviction. Separate port/container so it
+  # never touches another project's Redis.
+  redis:
+    image: redis:7-alpine
+    container_name: eventhub-redis
+    network_mode: bridge
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "127.0.0.1:56379:6379"
 volumes:
   eventhub_pgdata:

@@ -10,7 +10,8 @@
     "migrate": "tsx --env-file-if-exists=.env src/db/migrate.ts",
     "seed": "tsx --env-file-if-exists=.env src/db/seed.ts",
     "db:up": "docker compose --env-file .env up -d",
-    "experiment:explain": "tsx --env-file-if-exists=.env experiments/explain-events.ts"
+    "experiment:explain": "tsx --env-file-if-exists=.env experiments/explain-events.ts",
+    "experiment:cache": "tsx --env-file-if-exists=.env experiments/cache-latency.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
@@ -23,6 +24,7 @@
   },
   "dependencies": {
     "jose": "^6.2.18",
-    "pg": "^8.23.1"
+    "pg": "^8.23.1",
+    "redis": "^6.3.1"
   }
 }

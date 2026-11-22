@@ -2,6 +2,7 @@ import { validateEventInput, validateEventPatch } from "../../validation.ts";
 import type { FieldError, ListQuery } from "../../validation.ts";
 import type { Role } from "../../auth.ts";
 import type { EventItem, EventRepository } from "./repository.ts";
+import type { PublicEventCache } from "./public-cache.ts";
 
 // Application layer for events. Knows nothing about HTTP: no req/res, no status
 // codes. It returns typed outcomes; the controller maps them to responses.
@@ -18,13 +19,31 @@ export type Outcome<T> = { ok: true; value: T } | { ok: false; error: EventError
 const fail = (error: EventError): { ok: false; error: EventError } => ({ ok: false, error });
 
 export class EventService {
-  constructor(private readonly repo: EventRepository) {}
+  // `publicCache` is optional: without it every read goes to the repository.
+  constructor(
+    private readonly repo: EventRepository,
+    private readonly publicCache?: PublicEventCache,
+  ) {}
 
   list(): Promise<EventItem[]> {
     return this.repo.findAll();
   }
   get(id: number): Promise<EventItem | undefined> {
     return this.repo.findById(id);
+  }
+  // Public detail read, cache-aside. ONLY the public GET uses this. Authorization,
+  // edits and tickets keep using the uncached get()/repo reads, so a stale copy can
+  // never decide who may edit or what may be sold. Not-found is NOT cached: ids are
+  // serial, so a cached 404 would go stale the moment that event is created.
+  async getPublic(id: number): Promise<EventItem | undefined> {
+    const cache = this.publicCache;
+    if (!cache) return this.repo.findById(id);
+    const hit = await cache.read(id);
+    if (hit) return hit;
+    cache.stats.sourceReads++;
+    const event = await this.repo.findById(id);
+    if (event) await cache.write(event);
+    return event;
   }
   // Collection query: authorized scope (events are public, so all) -> filter ->
   // deterministic sort (id is the unique tie-break, always ascending) -> page slice,
@@ -68,6 +87,7 @@ export class EventService {
     const v = validateEventInput(input);
     if (!v.ok) return fail({ kind: "invalid", errors: v.errors });
     const event = await this.repo.replace(id, v.value);
+    await this.publicCache?.invalidate(id); // after the commit; a throw above skips it
     return event ? { ok: true, value: event } : fail({ kind: "not-found" });
   }
 
@@ -80,6 +100,7 @@ export class EventService {
     const v = validateEventPatch(input, auth.value);
     if (!v.ok) return fail({ kind: "invalid", errors: v.errors });
     const event = await this.repo.replace(id, v.value);
+    await this.publicCache?.invalidate(id); // after the commit; a throw above skips it
     return event ? { ok: true, value: event } : fail({ kind: "not-found" });
   }
 
@@ -87,6 +108,8 @@ export class EventService {
   async remove(actor: Actor, id: number): Promise<Outcome<true>> {
     if (!(await this.repo.findById(id))) return fail({ kind: "not-found" });
     if (actor.role !== "admin") return fail({ kind: "forbidden" });
-    return (await this.repo.remove(id)) ? { ok: true, value: true } : fail({ kind: "not-found" });
+    const removed = await this.repo.remove(id);
+    await this.publicCache?.invalidate(id); // after the commit; a throw above skips it
+    return removed ? { ok: true, value: true } : fail({ kind: "not-found" });
   }
 }

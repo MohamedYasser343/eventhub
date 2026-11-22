@@ -5,7 +5,7 @@
 - **Playlist position:** 13 (numbered title corroborated by course-specific independent notes; live playlist index not independently checked)
 - **Documented:** 2026-11-22
 - **Learning status:** Complete — owner explicitly requested uploading this lecture discussion to GitHub.
-- **Implementation status:** Not started. This documentation does not authorize implementation.
+- **Implementation status:** Complete (owner confirmed 2026-11-22); see the implementation evidence section.
 - **Source limitations:** The discussion used lecture-identifying metadata and independent, transcript-derived notes describing the video's sections. The original full recording/transcript was **not independently watched or verified end-to-end** during this session. The real-world descriptions below represent the lecture's educational examples, not audited internal designs of those companies. Engineering additions are labeled **Supplementary**. No EventHub code, tests, timings, or benchmarks were run for this documentation update.
 
 ## Learning objectives
@@ -332,11 +332,30 @@ Introduce an **optional cache for public event-detail reads**, then demonstrate 
 - [x] Conceptual notes, source limitations, diagrams, corrections, review scenario and practical assignment documented.
 - [x] Learning tracked independently from implementation in docs/PROGRESS.md.
 
-## Implementation evidence (coding agent; pending)
+## Implementation evidence (coding agent)
 
-No code change, Redis installation, PostgreSQL read, benchmark, migration, test run, cache outage test or owner implementation approval is claimed by this note.
+Status: implemented on branch `feat/lecture-13-caching`; **owner confirmed completion on 2026-11-22**. Decision record: [ADR-012](../decisions/012-public-event-cache.md). Note: the assignment's "lecture 12 not started" prerequisite line is stale; lecture 12 was completed and merged (PR #10), so the real PostgreSQL-backed path was used.
 
-- [ ] Implementation/experiment performed and changes linked.
-- [ ] Environment, commands and actual observed results recorded.
-- [ ] Negative cases, authorization checks and prior regressions demonstrated.
-- [ ] Owner confirms implementation completion and progress tracker updated independently.
+**What changed**
+- `src/cache.ts`: `Cache` interface, `RedisCache` (100 ms timeout, no offline queue, background reconnect, error listener), `noCache`, TTL validation.
+- `src/modules/events/public-cache.ts`: key scheme, shape validation, counters, invalidate.
+- `EventService.getPublic` (cache-aside) used only by `GET /events/:id`; `replace`/`patch`/`remove` invalidate after the write. `docker-compose.yml` gained the `eventhub-redis` service; `.env.example` gained `REDIS_URL`, `CACHE_TTL_SECONDS`, `TEST_REDIS_URL`. Test helpers clear only the `event:public:v1:` prefix.
+
+**Commands and actual results** (Node v24.22.1, Linux, `redis:7-alpine`, PostgreSQL 17 in Docker)
+- Baseline before any change: `npm test` 214/214 pass, `npm run typecheck` clean.
+- After: `npm test` with Redis: 231 tests, 231 pass; with `TEST_REDIS_URL=` unset: 231 tests, 228 pass, 3 skipped (the Redis-only ones), 0 fail; `npm run typecheck` clean. 17 new tests in `test/caching.test.ts`.
+- `npm run experiment:cache` (output in [docs/evidence/lecture-13-cache-latency.txt](../evidence/lecture-13-cache-latency.txt)): 5 rounds x 200 pairs, one synthetic row, localhost. Cold (miss) p50 1.52 to 2.66 ms, warm (hit) p50 0.90 to 1.52 ms; each round had 200 hits, 200 misses and 200 source reads. The gap is about 1 ms on localhost, noisy, and says nothing about production.
+- Outage: `docker stop eventhub-redis` mid-run; 100/100 GETs still returned 200 from PostgreSQL (p50 1.04 ms, p95 1.71 ms, max 3.2 ms, 200 cache errors counted). After `docker start`, the first cache hit came back after 430 ms with no app restart (one run).
+
+**Criteria demonstrated by tests:** miss then hit with one source read (1); same body and ETag, 304 served from a hit (3); TTL expiry refreshes from source (4); PUT, PATCH and DELETE visible on the next GET, and a deleted event stops being served (5); failed, forbidden and invalid writes leave the cache alone, and DEL failing after commit still returns success (6); unreachable Redis fails within the timeout and reads fall back (7); only the `{id,name,seats}` public shape is cached (8); a stale cached copy does not affect `TicketService` (9).
+
+**Negative and edge cases:** not-found is not cached; malformed, wrong-shape and wrong-id cached values are treated as misses and replaced; old schema-version keys are simply never read.
+
+**Characterized, deliberately not fixed:** stampede (20 parallel cold reads cause 20 source reads) and the read-vs-invalidate race (an in-flight pre-update read re-caches the old value; bounded by TTL).
+
+**Not done / limitations:** no memory-pressure or eviction experiment; no `X-Forwarded-For` or rate-limit work (not in this assignment's scope); POST /bookings is still a 501 stub, so the "last ticket" case is shown structurally, not with real reservations; single machine, tiny dataset, one-off timings.
+
+- [x] Implementation/experiment performed and changes linked.
+- [x] Environment, commands and actual observed results recorded.
+- [x] Negative cases, authorization checks and prior regressions demonstrated.
+- [x] Owner confirmed implementation completion (2026-11-22) and progress tracker updated independently.

@@ -1,0 +1,8 @@
+node v24.22.1, linux, redis redis://127.0.0.1:56379, 1 synthetic row
+round 1: cold p50 2.58 ms  p95 4.42 ms  (n=200) | warm p50 1.52 ms  p95 2.73 ms  (n=200) | hits 200 misses 200 sourceReads 200
+round 2: cold p50 1.64 ms  p95 3.25 ms  (n=200) | warm p50 0.92 ms  p95 1.96 ms  (n=200) | hits 200 misses 200 sourceReads 200
+round 3: cold p50 1.86 ms  p95 4.59 ms  (n=200) | warm p50 1.05 ms  p95 2.57 ms  (n=200) | hits 200 misses 200 sourceReads 200
+round 4: cold p50 2.66 ms  p95 3.89 ms  (n=200) | warm p50 1.50 ms  p95 2.56 ms  (n=200) | hits 200 misses 200 sourceReads 200
+round 5: cold p50 1.52 ms  p95 2.42 ms  (n=200) | warm p50 0.90 ms  p95 1.43 ms  (n=200) | hits 200 misses 200 sourceReads 200
+redis STOPPED: all 100 GETs returned 200 from Postgres | p50 1.04 ms  p95 1.71 ms  (n=100) | max 3.2 ms | errors 200 sourceReads 100
+redis RESTARTED: first cache hit again after 430 ms (client reconnected by itself)
