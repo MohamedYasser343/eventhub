@@ -5,6 +5,7 @@ import { parseQuery, Router } from "./router.ts";
 import type { Query, Registrar } from "./router.ts";
 import { AuthService, ticketsByUser } from "./auth.ts";
 import { pool } from "./db/pool.ts";
+import { cache, cacheTtlSeconds } from "./cache.ts";
 import { seedDemo } from "./db/seed.ts";
 import { PgUserRepository } from "./modules/auth/user-repository.ts";
 import { createProtect, ignoredBodyHeaders, sendJson } from "./http/app.ts";
@@ -18,6 +19,7 @@ import { createEventsController } from "./modules/events/controller.ts";
 import { PgEventRepository } from "./modules/events/repository.ts";
 import type { EventItem } from "./modules/events/repository.ts";
 import { EventService } from "./modules/events/service.ts";
+import { PublicEventCache } from "./modules/events/public-cache.ts";
 import { createTicketsController } from "./modules/tickets/controller.ts";
 import { InMemoryTicketRepository } from "./modules/tickets/repository.ts";
 import { TicketService } from "./modules/tickets/service.ts";
@@ -29,7 +31,11 @@ export type { EventItem, RouteContext };
 // The only place where concrete classes are chosen and wired, by hand (no DI
 // container). Dependencies point inward: controller -> service -> repository.
 export const auth = new AuthService(new PgUserRepository(pool));
-const eventService = new EventService(new PgEventRepository(pool));
+// Cache failures are logged as ids + operation only (never keys' values or the URL).
+export const publicEventCache = new PublicEventCache(cache, cacheTtlSeconds, (what, id) =>
+  logSink.write?.(JSON.stringify({ level: "warn", cache: what, eventId: id })),
+);
+const eventService = new EventService(new PgEventRepository(pool), publicEventCache);
 const ticketService = new TicketService(new InMemoryTicketRepository(ticketsByUser), eventService);
 const accountService = new AccountService(auth);
 const protect = createProtect(auth);

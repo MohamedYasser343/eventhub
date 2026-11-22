@@ -80,7 +80,7 @@ export function createEventsController(events: EventService) {
     },
 
     async get(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
-      const event = await events.get(idOf(ctx));
+      const event = await events.getPublic(idOf(ctx));
       if (!event) return notFound(res);
       const etag = etagOf(JSON.stringify(event));
       const headers = { ETag: etag, "Cache-Control": "no-cache" };

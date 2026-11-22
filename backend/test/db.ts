@@ -1,5 +1,7 @@
 import { pool } from "../src/db/pool.ts";
 import { migrate } from "../src/db/migrate.ts";
+import { cache } from "../src/cache.ts";
+import { EVENT_KEY_PREFIX } from "../src/modules/events/public-cache.ts";
 import type { EventItem } from "../src/modules/events/repository.ts";
 
 export const SEED: EventItem[] = [
@@ -12,13 +14,19 @@ export const SEED: EventItem[] = [
 export async function resetAll(): Promise<void> {
   await migrate(pool);
   await pool.query("TRUNCATE events, users RESTART IDENTITY CASCADE");
+  await clearEventCache();
 }
+
+// Ids restart after TRUNCATE, so cached copies of "event 1" would be stale. Only this
+// namespace is deleted, never FLUSHALL.
+export const clearEventCache = () => cache.deletePrefix(EVENT_KEY_PREFIX);
 
 // Replace every event with `seed`, all owned by one synthetic organizer nobody logs in
 // as (so only an admin may edit them, like the old ownerless seed events). Ids restart
 // at 1, so `seed` ids must be 1..n in order; the next created id is n + 1.
 export async function resetEvents(seed: EventItem[] = SEED): Promise<void> {
   await pool.query("TRUNCATE events RESTART IDENTITY CASCADE");
+  await clearEventCache();
   const owner = await pool.query<{ id: number }>(
     `INSERT INTO users (username, role, password_hash) VALUES ('seed_owner', 'organizer', 'x')
      ON CONFLICT (lower(username)) DO UPDATE SET username = users.username RETURNING id`,
