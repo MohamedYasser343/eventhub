@@ -1,6 +1,6 @@
 # ADR-011: PostgreSQL persistence for users and events
 
-Status: Accepted (implementation awaiting owner confirmation)
+Status: Accepted (owner confirmed 2026-11-22)
 Date: 2026-11-22
 Related lecture: [12 - Mastering Databases with Postgres](../lectures/12-mastering-databases-postgres.md)
 

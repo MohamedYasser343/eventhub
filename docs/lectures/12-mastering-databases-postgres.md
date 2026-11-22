@@ -5,7 +5,7 @@
 - Playlist position: **12** (video's numbered title corroborated by course index).
 - Session/documentation date: **2026-11-21**.
 - Learning status: **Complete — owner requested this GitHub documentation upload after the teaching session**.
-- Implementation status: **Not started; not inferred from learning completion**.
+- Implementation status: **Complete (owner confirmed 2026-11-22)**.
 - Source availability: original YouTube video metadata and third-party transcript-derived chapter summaries confirm identity and broad subject matter; the **full original recording/transcript was not directly reviewed or verified end to end**. Sections marked *supplementary* explain additional database engineering and the EventHub domain. These are teaching notes, not a verbatim or timestamp-perfect transcript. No EventHub tests, benchmarks or migrations were executed as part of this documentation update.
 
 ## Learning objectives
@@ -482,7 +482,7 @@ The teaching session explained the topics with EventHub-specific examples, diagr
 
 ## Implementation evidence (coding agent)
 
-Status: **implemented, awaiting owner review.** Branch `feat/lecture-12-postgres` (not merged). Owner decisions during implementation: users also move to PostgreSQL; the in-memory repository is removed ([ADR-011](../decisions/011-postgresql-persistence.md)).
+Status: **complete, owner confirmed 2026-11-22.** Branch `feat/lecture-12-postgres`, PR #10. Owner decisions during implementation: users also move to PostgreSQL; the in-memory repository is removed ([ADR-011](../decisions/011-postgresql-persistence.md)).
 
 **Environment:** Node v24.22.1, `pg` 8.23, PostgreSQL 17 (Docker `postgres:17`, 17.11) on 127.0.0.1:56432, Linux 7.0, i7-1255U / 22.7 GiB. Databases `eventhub_dev` and `eventhub_test`; credentials only in the gitignored `backend/.env`.
 
@@ -526,4 +526,4 @@ Status: **implemented, awaiting owner review.** Branch `feat/lecture-12-postgres
 - [x] Implementation/experiment performed (commit linked after review).
 - [x] Actual commands and results recorded (including negative and concurrency cases).
 - [x] Acceptance criteria demonstrated and prior regressions checked (see above).
-- [ ] Owner confirms implementation completion and progress tracker updated independently.
+- [x] Owner confirms implementation completion (2026-11-22) and progress tracker updated independently.
