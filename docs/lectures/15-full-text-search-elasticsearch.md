@@ -433,7 +433,7 @@ Use the existing endpoint convention when possible; **example only**: `GET /v1/e
 
 ## Implementation evidence (coding agent)
 
-**Status: implemented, awaiting owner review.** Scope: PostgreSQL substring baseline vs. PostgreSQL FTS (steps 1-4, 6). The optional Elasticsearch lab was **not** done (needs owner approval). See [ADR-014](../decisions/014-fts-event-search.md). Not committed yet.
+**Status: complete (owner confirmed 2026-11-23; PR #13).** Scope: PostgreSQL substring baseline vs. PostgreSQL FTS (steps 1-4, 6). The optional Elasticsearch lab was **not** done (needs owner approval). See [ADR-014](../decisions/014-fts-event-search.md).
 
 **Repo reality found first:** events have only `name` and `seats` (no description, no draft/cancelled state, no category), so only the name is searchable, every event is public, and "title vs description priority" does not apply yet. `GET /api/v1/events/search` already existed as a mock; it now runs the real search. `GET /api/v1/events?q=` (lecture 11 substring filter) is the **baseline** and is unchanged.
 
@@ -462,7 +462,7 @@ At 20,000 rows the same shape: rare 1.5 ms (FTS) vs 35 ms (ILIKE); common 42.7 m
 
 **Not done / limitations:** Elasticsearch lab and outage/lag experiments; description field and visibility filtering (do not exist); `pg_trgm`/prefix/typo search; multilingual analyzers; interaction with the lecture-13 detail cache (search is not cached and never feeds booking or authorization).
 
-- [x] Implementation and reproducible experiment (uncommitted working tree).
+- [x] Implementation and reproducible experiment (merged in PR #13).
 - [x] Query-plan and latency evidence with commands, environment and limitations.
 - [x] Negative cases and regression run.
-- [ ] Owner confirms implementation completion (required before PROGRESS marks it complete).
+- [x] Owner confirmed implementation completion (2026-11-23).

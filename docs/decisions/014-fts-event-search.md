@@ -1,6 +1,6 @@
 # ADR-014: PostgreSQL full-text search for event names
 
-Status: Proposed (awaiting owner confirmation)
+Status: Accepted (owner confirmed 2026-11-23)
 Date: 2026-11-23
 Related lecture: [15 - Full Text Search using Elasticsearch](../lectures/15-full-text-search-elasticsearch.md)
 
