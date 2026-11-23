@@ -1,5 +1,5 @@
 import type pg from "pg";
-import type { EventFields, ListQuery } from "../../validation.ts";
+import type { EventFields, ListQuery, SearchQuery } from "../../validation.ts";
 
 export interface EventItem {
   id: number;
@@ -14,7 +14,8 @@ export interface EventRepository {
   findAll(): Promise<EventItem[]>;
   // Filter, deterministic sort and page slice happen in SQL; total counts every match.
   query(q: ListQuery): Promise<{ data: EventItem[]; total: number }>;
-  search(needle: string): Promise<EventItem[]>;
+  // Full-text search (lecture 15): ranked, deterministic page + total of all matches.
+  search(q: SearchQuery): Promise<{ data: EventItem[]; total: number }>;
   insert(fields: EventFields, ownerId: number): Promise<EventItem>;
   replace(id: number, fields: EventFields): Promise<EventItem | undefined>; // undefined: no such event
   remove(id: number): Promise<boolean>;
@@ -62,8 +63,30 @@ export class PgEventRepository implements EventRepository {
       client.release();
     }
   }
-  async search(needle: string) {
-    return (await this.pool.query<EventItem>(`SELECT ${COLUMNS} FROM events WHERE ${MATCH} ORDER BY id`, [needle])).rows;
+  async search(q: SearchQuery) {
+    // The tsvector expression is the one indexed by events_name_fts_idx (migration 003).
+    // plainto_tsquery treats the input as plain words (AND), never as operator syntax, and
+    // a query with no usable words (e.g. "!!!") simply matches nothing.
+    const vec = "to_tsvector('simple', name)";
+    const tsq = "plainto_tsquery('simple', $1)";
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      const total = Number((await client.query<{ n: string }>(`SELECT count(*) AS n FROM events WHERE ${vec} @@ ${tsq}`, [q.q])).rows[0]!.n);
+      const data = (
+        await client.query<EventItem>(
+          `SELECT ${COLUMNS} FROM events WHERE ${vec} @@ ${tsq} ORDER BY ts_rank(${vec}, ${tsq}) DESC, id ASC LIMIT $2 OFFSET $3`,
+          [q.q, q.limit, q.offset],
+        )
+      ).rows;
+      await client.query("COMMIT");
+      return { data, total };
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
   }
   async insert(f: EventFields, ownerId: number) {
     return (

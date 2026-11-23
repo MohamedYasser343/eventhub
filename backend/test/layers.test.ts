@@ -21,7 +21,7 @@ class FakeRepo implements EventRepository {
   async findById(id: number) { this.calls.push("findById"); return this.items.get(id); }
   async findAll() { this.calls.push("findAll"); return [...this.items.values()]; }
   async query() { this.calls.push("query"); return { data: [...this.items.values()], total: this.items.size }; }
-  async search() { this.calls.push("search"); return [...this.items.values()]; }
+  async search() { this.calls.push("search"); return { data: [...this.items.values()], total: this.items.size }; }
   async insert(f: { name: string; seats: number }, ownerId: number) {
     this.calls.push("insert");
     const e = { id: 2, ...f }; this.items.set(2, e); this.owners.set(2, ownerId); return e;

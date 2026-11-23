@@ -13,6 +13,7 @@
     "experiment:explain": "tsx --env-file-if-exists=.env experiments/explain-events.ts",
     "jobs:worker": "tsx --env-file-if-exists=.env src/jobs/worker-main.ts",
     "jobs:enqueue": "tsx --env-file-if-exists=.env src/jobs/enqueue-main.ts",
+    "experiment:search": "tsx --env-file-if-exists=.env experiments/search-compare.ts",
     "experiment:cache": "tsx --env-file-if-exists=.env experiments/cache-latency.ts"
   },
   "devDependencies": {

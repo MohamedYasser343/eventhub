@@ -431,11 +431,38 @@ Use the existing endpoint convention when possible; **example only**: `GET /v1/e
 - [x] Concepts, diagrams, demo-specific caveats, supplementary corrections and EventHub assignment recorded.
 - [x] Learning completion to be recorded independently in `docs/PROGRESS.md` in this upload workflow.
 
-## Implementation evidence (coding agent; pending)
+## Implementation evidence (coding agent)
 
-**Status: Not started.** No EventHub search implementation, tests, benchmarks or Elasticsearch deployment were performed while writing these notes.
+**Status: implemented, awaiting owner review.** Scope: PostgreSQL substring baseline vs. PostgreSQL FTS (steps 1-4, 6). The optional Elasticsearch lab was **not** done (needs owner approval). See [ADR-014](../decisions/014-fts-event-search.md). Not committed yet.
 
-- [ ] Implementation and/or reproducible experiment (actual code/files/commits).
-- [ ] Query-plan and latency evidence with commands, measured results, environment and limitations.
-- [ ] Negative cases, visibility/authorization and prior behavior regression checks.
-- [ ] Learner confirms implementation completion and implementation progress updated independently.
+**Repo reality found first:** events have only `name` and `seats` (no description, no draft/cancelled state, no category), so only the name is searchable, every event is public, and "title vs description priority" does not apply yet. `GET /api/v1/events/search` already existed as a mock; it now runs the real search. `GET /api/v1/events?q=` (lecture 11 substring filter) is the **baseline** and is unchanged.
+
+**Changes:** `migrations/003_event_name_fts.sql` (GIN on `to_tsvector('simple', name)`); `PgEventRepository.search`, `EventService.search`, `parseSearchQuery` (validation.ts), `searchV1` (controller); `test/search.test.ts`; `experiments/search-compare.ts` (`npm run experiment:search`); two existing tests updated for the third migration and the new `search()` return shape.
+
+**Commands and results (2026-11-23, local, PostgreSQL 17.11 in Docker, Node v24.22.1):**
+- `npm run typecheck`: clean.
+- `npm test`: 256 tests, 256 pass, 0 fail (includes the new search tests and all earlier regressions: HTTP, routing, auth, PostgreSQL, Redis cache, queues).
+- `ROWS=20000 npm run experiment:search` and `ROWS=200000 ...`: full output in [20k](../evidence/lecture-15-search-20k.txt) and [200k](../evidence/lecture-15-search-200k.txt).
+
+**Median of 15 warm runs, `LIMIT 10`, ms, with the GIN index (client round trip included; noisy machine, other containers running):**
+
+| Query (200,000 rows) | substring `position()` | `ILIKE '%t%'` | FTS ranked |
+| --- | ---: | ---: | ---: |
+| rare word (225 matches) | 15.7 | 187.5 | 2.6 |
+| very common word (115,402 matches) | 0.8 | 1.0 | 300.6 |
+| no match (`labtop`) | 220.7 | 145.8 | 1.0 |
+
+At 20,000 rows the same shape: rare 1.5 ms (FTS) vs 35 ms (ILIKE); common 42.7 ms (FTS) vs 1.3 ms. Before the index FTS was *slower* than ILIKE (520 ms rare at 200k) because it computes a tsvector per row. Plans confirm `Bitmap Index Scan on events_name_fts_idx` for FTS and `Seq Scan` for ILIKE on rare terms.
+
+**Findings:** (1) the index is what makes FTS fast, the engine alone is not; (2) FTS loses on a very common word with `LIMIT 10`: the substring scan stops after 10 hits, while ranking must score all 115k matches; (3) the write cost of the index was +35% on a single 50k-row insert (2093 vs 1549 ms, one run, indicative only); index size 776 kB for 200k short names; (4) no fairness claim beyond this synthetic, skewed, single-field dataset.
+
+**Negative cases tested (HTTP, `test/search.test.ts`):** missing/blank/101-char/repeated `q`, bad `page`/`limit` = 400; `%`, `_`, `'; DROP TABLE events; --`, `jazz | engineering`, `jazz & !night`, `!!!` are plain data (nothing dropped; `!` does not negate; punctuation-only matches nothing); no-match = 200 empty; page past the end = 200 empty with `total`; rename and delete are visible immediately. Typo (`labtop`, `jazzz`) and partial word (`jaz`) return nothing: no automatic correction. Arabic title matches on a whole token (`الذكاء`); Arabic stemming is unsupported by design (`simple`).
+
+**Answer to the lecture's design check (20,000 events, simple search):** PostgreSQL FTS first, measured against the baseline, as the numbers above show for rare terms; Elasticsearch only if measured relevance/features justify it. This is the agent's recommendation, not a recorded learner answer.
+
+**Not done / limitations:** Elasticsearch lab and outage/lag experiments; description field and visibility filtering (do not exist); `pg_trgm`/prefix/typo search; multilingual analyzers; interaction with the lecture-13 detail cache (search is not cached and never feeds booking or authorization).
+
+- [x] Implementation and reproducible experiment (uncommitted working tree).
+- [x] Query-plan and latency evidence with commands, environment and limitations.
+- [x] Negative cases and regression run.
+- [ ] Owner confirms implementation completion (required before PROGRESS marks it complete).

@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { scalar } from "../../router.ts";
-import { parseListQuery } from "../../validation.ts";
+import { parseListQuery, parseSearchQuery } from "../../validation.ts";
 import { badQuery, forbidden, idOf, ignoredBodyHeaders, notFound, readJson, sendJson, unprocessable } from "../../http/app.ts";
 import type { Authed, RouteContext } from "../../http/app.ts";
 import type { EventItem } from "./repository.ts";
@@ -72,11 +71,14 @@ export function createEventsController(events: EventService) {
       });
     },
 
-    // Mock search: case-insensitive substring match on the name; no q returns all.
+    // Full-text search (lecture 15, ADR-014): q is required, 1..100 chars after trimming;
+    // page/limit as in the list. Ranked by relevance, ties by id. Unknown keys ignored.
     async searchV1(_req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
-      const q = scalar(ctx.query, "q");
-      if (!q.ok) return badQuery(res, [{ path: "q", code: "REPEATED", message: "q must not be repeated" }]);
-      sendJson(res, 200, { data: await events.search(q.value ?? ""), meta: { q: q.value ?? null } });
+      const parsed = parseSearchQuery(ctx.query);
+      if (!parsed.ok) return badQuery(res, parsed.errors);
+      const { q, page, limit } = parsed.value;
+      const r = await events.search(parsed.value);
+      sendJson(res, 200, { data: r.data, meta: { q, page, pageSize: limit, total: r.total, totalPages: r.totalPages } });
     },
 
     async get(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
