@@ -23,5 +23,19 @@ services:
     command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
     ports:
       - "127.0.0.1:56379:6379"
+  # Lecture 14: DURABLE job queue, deliberately separate from the cache above. Pending
+  # jobs must not be evicted (noeviction: a full Redis refuses writes instead of dropping
+  # jobs) and should survive a restart (AOF, fsync every second: up to ~1 s of acknowledged
+  # writes can still be lost on a crash). Its own port, container and volume.
+  queue-redis:
+    image: redis:7-alpine
+    container_name: eventhub-queue-redis
+    network_mode: bridge
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "127.0.0.1:56380:6379"
+    volumes:
+      - eventhub_queuedata:/data
 volumes:
   eventhub_pgdata:
+  eventhub_queuedata:

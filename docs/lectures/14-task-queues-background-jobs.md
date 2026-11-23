@@ -5,7 +5,7 @@
 - Playlist position: 14, identified by secondary transcript-derived notes.
 - Date documented: 2026-11-23.
 - Learning status: **Complete — explicit request to upload the lecture discussion**.
-- Implementation status: **Not started**. No code/tests were changed or run by this documentation commit.
+- Implementation status: **Complete** (owner confirmed 2026-11-23; see the implementation evidence section at the end).
 - Source verification: The lesson was reconstructed from the learner's discussion and [independent timestamped notes and ASR transcript](https://github.com/shubhamscifi/backend_from_first_principles_notes/tree/main/14_task_queues_background_jobs). The recording itself was not independently watched in this documentation pass. ASR contains transcription errors (Celery, BullMQ, Asynq, Redis, etc.); detailed engineering caveats below are labeled supplementary, rather than attributed verbatim to the presenter.
 
 ## Learning objectives
@@ -287,11 +287,37 @@ Build a **small, isolated background notification lab** within the existing Node
 - [x] Concepts, source caveats, diagrams, discussion scenario, corrections and implementation assignment documented.
 - [x] Learning status recorded separately from implementation in docs/PROGRESS.md.
 
-## Implementation evidence (coding agent; pending)
+## Implementation evidence (coding agent)
 
-**Status: Not started.** This commit documents the lecture only. No application code, worker runs, tests, benchmark results or production behaviors were implemented or verified here.
+**Status: Complete** (implemented 2026-11-23; owner confirmed 2026-11-23; PR #12). Owner choices: BullMQ, dedicated queue Redis, CLI + tests as trigger. Decision record: [ADR-013](../decisions/013-background-jobs-bullmq.md).
 
-- [ ] Code change or reproducible experiment documented with actual outputs.
-- [ ] Positive, negative and crash/replay tests demonstrated.
-- [ ] Prior functionality regression checks recorded.
-- [ ] Owner confirms implementation complete and progress tracker updated independently.
+**Environment:** Linux, Node via `tsx`, PostgreSQL 17 and Redis 7 in local containers, BullMQ 6.7.8.
+
+**Baseline before changes:** `npm test` 231/231, `npm run typecheck` clean.
+
+**Added:** `src/jobs/{notification,queue,worker-main,enqueue-main}.ts`, migration `002_notification_lab.sql`, `eventhub-queue-redis` compose service (AOF everysec, noeviction, port 56380), `test/jobs.test.ts` (16 tests), `test/setup.ts` guard for `TEST_QUEUE_REDIS_URL`, scripts `jobs:worker` / `jobs:enqueue`. `test/postgres.test.ts` was updated only because it hard-coded the migration list.
+
+**Automated results (`test/jobs.test.ts`, 16/16 passing):**
+
+| Acceptance criterion | Test |
+| --- | --- |
+| 1 Producer returns without waiting | 600 ms slow provider; `enqueueMs` asserted < 300; 0 sent at accept time; completed later by the worker |
+| 2 Controlled malformed/unknown jobs | bad version, unknown job type: 1 attempt, `InvalidJobError`, no payload content in logs |
+| 3 Bounded exponential backoff | `transient:2` retries at >=50 ms and >=100 ms gaps, then succeeds; `transient:99` fails after exactly 3 attempts and stays in the failed list; `permanent` fails after 1 attempt; per-attempt timeout fails as `handler timeout` |
+| 4 Crash before completion | child worker process dies (exit 137) after the side effect; Redis still shows the job active; a new worker re-runs it after the 1 s lock expires; completed |
+| 5 No duplicate mock effect | duplicate enqueue (one job); replay as a separate job; 10 concurrent handlers; two workers with three jobs of one logical id; ambiguous send then retry: always exactly one `mock_provider_sent` row. The crash test also shows the job really ran twice (`attempts` = 2) |
+| 6 Truthful enqueue failure | unreachable Redis throws `EnqueueError`; invalid payload rejected before the queue |
+| 7 Logs and health | state sequences asserted (`active, retry_scheduled, ..., completed`); `queueStats` backlog and oldest-waiting age |
+| 8 Regression | `npm test` 247/247 (231 + 16), `npm run typecheck` clean |
+
+**Manual experiments (dev containers, CLI, one run each):**
+- Enqueue with no worker, then `docker restart eventhub-queue-redis`: the job survived (waiting 1 before and after), and a worker started afterwards completed it. This is AOF at work; a crash could still lose ~1 s of writes.
+- `docker stop eventhub-queue-redis`, then enqueue: `could not enqueue: queue backend unavailable`, exit 1, no "accepted".
+- Worker running a `slow:3000` job while Redis was stopped for about 4 s and restarted: the worker reconnected on its own and the job completed (one `sent` row, `attempts` 1). Redis loss during processing was survived in this single run; it is not a proof for every timing.
+
+**Not done or not shown:** jitter, rate limiting, recurring/chained/batch jobs, transactional outbox, real booking trigger, load numbers (no benchmark was run). Idempotency depends on the mock provider's key support; a provider without it can still duplicate after a crash.
+
+- [x] Code change and reproducible tests documented with actual outputs.
+- [x] Positive, negative and crash/replay tests demonstrated.
+- [x] Prior functionality regression checks recorded.
+- [x] Owner confirmed implementation complete on 2026-11-23; progress tracker updated independently.
