@@ -1,6 +1,6 @@
 # ADR-013: BullMQ notification jobs on a dedicated durable Redis
 
-Status: Proposed (awaiting owner confirmation of lecture 14 implementation)
+Status: Accepted (owner confirmed 2026-11-23)
 Date: 2026-11-23
 Related lecture: [14 - Task Queues and Background Jobs](../lectures/14-task-queues-background-jobs.md)
 

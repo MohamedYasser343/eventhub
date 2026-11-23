@@ -5,7 +5,7 @@
 - Playlist position: 14, identified by secondary transcript-derived notes.
 - Date documented: 2026-11-23.
 - Learning status: **Complete — explicit request to upload the lecture discussion**.
-- Implementation status: **Awaiting learner review** (see the implementation evidence section at the end).
+- Implementation status: **Complete** (owner confirmed 2026-11-23; see the implementation evidence section at the end).
 - Source verification: The lesson was reconstructed from the learner's discussion and [independent timestamped notes and ASR transcript](https://github.com/shubhamscifi/backend_from_first_principles_notes/tree/main/14_task_queues_background_jobs). The recording itself was not independently watched in this documentation pass. ASR contains transcription errors (Celery, BullMQ, Asynq, Redis, etc.); detailed engineering caveats below are labeled supplementary, rather than attributed verbatim to the presenter.
 
 ## Learning objectives
@@ -289,7 +289,7 @@ Build a **small, isolated background notification lab** within the existing Node
 
 ## Implementation evidence (coding agent)
 
-**Status: Awaiting learner review** (implemented 2026-11-23, not yet confirmed by the owner; nothing committed at the time of writing). Owner choices: BullMQ, dedicated queue Redis, CLI + tests as trigger. Decision record: [ADR-013](../decisions/013-background-jobs-bullmq.md).
+**Status: Complete** (implemented 2026-11-23; owner confirmed 2026-11-23; PR #12). Owner choices: BullMQ, dedicated queue Redis, CLI + tests as trigger. Decision record: [ADR-013](../decisions/013-background-jobs-bullmq.md).
 
 **Environment:** Linux, Node via `tsx`, PostgreSQL 17 and Redis 7 in local containers, BullMQ 6.7.8.
 
@@ -320,4 +320,4 @@ Build a **small, isolated background notification lab** within the existing Node
 - [x] Code change and reproducible tests documented with actual outputs.
 - [x] Positive, negative and crash/replay tests demonstrated.
 - [x] Prior functionality regression checks recorded.
-- [ ] Owner confirms implementation complete and progress tracker updated independently.
+- [x] Owner confirmed implementation complete on 2026-11-23; progress tracker updated independently.
