@@ -1,12 +1,12 @@
 # Progress tracker
 
-Last updated: 2026-11-22.
+Last updated: 2026-11-23.
 
 ## Current state
 - Repository initialization: documentation foundations prepared.
-- Learning: lectures 05–13 complete (05–06 confirmed 2026-11-16; 07–08 confirmed 2026-11-19; 09–11 confirmed 2026-11-20; 12 documented by explicit GitHub upload request 2026-11-21; 13 documented by explicit GitHub upload request 2026-11-22); reference notes for 01–04 prepared, completion not confirmed.
+- Learning: lectures 05–14 complete (05–06 confirmed 2026-11-16; 07–08 confirmed 2026-11-19; 09–11 confirmed 2026-11-20; 12 documented by explicit GitHub upload request 2026-11-21; 13 documented by explicit GitHub upload request 2026-11-22; 14 documented by explicit GitHub upload request 2026-11-23); reference notes for 01–04 prepared, completion not confirmed.
 - Implementation: lecture 10 complete (owner confirmed 2026-11-20). Lecture 05 complete (owner confirmed 2026-11-18; endpoints, CORS, ETag and experiments demonstrated; optional gzip deferred; ADR-001 to ADR-004).
-- Next learning milestone: playlist position 14 (queues/background work; scope to verify). Lecture 11 implementation complete (owner confirmed 2026-11-20; ADR-010). Lecture 12 implementation complete (owner confirmed 2026-11-22; ADR-011; PostgreSQL for users and events). Lecture 13 implementation complete (owner confirmed 2026-11-22; ADR-012; PR #11; Redis cache for public event detail). Next implementation milestone: lecture 14 (needs owner approval).
+- Next learning milestone: playlist position 15 (search; scope to verify). Lecture 11 implementation complete (owner confirmed 2026-11-20; ADR-010). Lecture 12 implementation complete (owner confirmed 2026-11-22; ADR-011; PostgreSQL for users and events). Lecture 13 implementation complete (owner confirmed 2026-11-22; ADR-012; PR #11; Redis cache for public event detail). Next implementation milestone: lecture 14 (needs owner approval).
 - Implementation: lecture 06 complete (owner confirmed 2026-11-18; router, v1 routes, collision experiment, edge cases; ADR-005).
 - Implementation: lectures 07 and 08 complete (owner confirmed 2026-11-19; ADR-006, ADR-007). Lecture 09 complete (owner confirmed 2026-11-20; ADR-008) on branch `feat/lecture-09-validation`, PR #5.
 - Backend language: Node/TypeScript, native `node:http`, `tsx` dev runner ([ADR-001](decisions/001-backend-language-and-tooling.md)).
@@ -31,7 +31,7 @@ Track learning and implementation independently. Status values: not started, in 
 | 11 | Complete | Complete | [Complete REST API Design](lectures/11-rest-api-design.md), 2026-11-20; third-party transcript/notes reviewed; PATCH idempotency clarification; no open learner questions recorded. | [Evidence](lectures/11-rest-api-design.md#implementation-evidence-coding-agent), ADR-010 |
 | 12 | Complete | Complete | [Mastering Databases with Postgres](lectures/12-mastering-databases-postgres.md), 2026-11-21; discussion and assignment documented; original full transcript not independently reviewed. | [Evidence](lectures/12-mastering-databases-postgres.md#implementation-evidence-coding-agent), ADR-011, PR #10 |
 | 13 | Complete | Complete (owner confirmed 2026-11-22) | [Caching, the Secret Behind It All](lectures/13-caching.md), 2026-11-22; learning discussion, source limitations and assignment documented; original full video not independently reviewed. | [Evidence](lectures/13-caching.md#implementation-evidence-coding-agent), ADR-012, PR #11 |
-| 14 | Not started | Not started | — | — |
+| 14 | Complete | Not started | [Task Queues and Background Jobs](lectures/14-task-queues-background-jobs.md), 2026-11-23; lecture explained and documented after explicit GitHub upload request; secondary transcript-derived notes reviewed, video not independently watched; conceptual retry-after-ACK-crash question was posed but not answered by learner. | — |
 | 15 | Not started | Not started | — | — |
 | 16 | Not started | Not started | — | — |
 | 17 | Not started | Not started | — | — |
