@@ -11,6 +11,8 @@
     "seed": "tsx --env-file-if-exists=.env src/db/seed.ts",
     "db:up": "docker compose --env-file .env up -d",
     "experiment:explain": "tsx --env-file-if-exists=.env experiments/explain-events.ts",
+    "jobs:worker": "tsx --env-file-if-exists=.env src/jobs/worker-main.ts",
+    "jobs:enqueue": "tsx --env-file-if-exists=.env src/jobs/enqueue-main.ts",
     "experiment:cache": "tsx --env-file-if-exists=.env experiments/cache-latency.ts"
   },
   "devDependencies": {
@@ -23,6 +25,8 @@
     "esbuild": false
   },
   "dependencies": {
+    "bullmq": "^6.7.8",
+    "ioredis": "^6.0.0",
     "jose": "^6.2.18",
     "pg": "^8.23.1",
     "redis": "^6.3.1"

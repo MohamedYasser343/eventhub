@@ -16,3 +16,14 @@ if (redisUrl) {
 } else {
   delete process.env["REDIS_URL"];
 }
+
+// Lecture 14: the job queue has its own Redis. Tests use TEST_QUEUE_REDIS_URL only (loopback,
+// since tests delete their own uniquely-prefixed keys); unset means the queue tests are skipped.
+const queueUrl = process.env["TEST_QUEUE_REDIS_URL"];
+if (queueUrl) {
+  const host = new URL(queueUrl).hostname;
+  if (!["127.0.0.1", "localhost", "[::1]"].includes(host)) throw new Error("TEST_QUEUE_REDIS_URL must point at localhost");
+  process.env["QUEUE_REDIS_URL"] = queueUrl;
+} else {
+  delete process.env["QUEUE_REDIS_URL"];
+}
