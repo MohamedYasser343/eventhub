@@ -1,5 +1,5 @@
 import { validateEventInput, validateEventPatch } from "../../validation.ts";
-import type { FieldError, ListQuery } from "../../validation.ts";
+import type { FieldError, ListQuery, SearchQuery } from "../../validation.ts";
 import type { Role } from "../../auth.ts";
 import type { EventItem, EventRepository } from "./repository.ts";
 import type { PublicEventCache } from "./public-cache.ts";
@@ -52,8 +52,11 @@ export class EventService {
     const { data, total } = await this.repo.query(q);
     return { data, total, totalPages: Math.ceil(total / q.limit) };
   }
-  search(needle: string): Promise<EventItem[]> {
-    return this.repo.search(needle);
+  // Ranked full-text search. All events are public today (no draft/cancelled state),
+  // so there is no visibility filter; add it here when such a state exists.
+  async search(q: SearchQuery): Promise<{ data: EventItem[]; total: number; totalPages: number }> {
+    const { data, total } = await this.repo.search(q);
+    return { data, total, totalPages: Math.ceil(total / q.limit) };
   }
 
   // Business authorization. Organizers manage only events they own.

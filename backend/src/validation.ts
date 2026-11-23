@@ -201,6 +201,48 @@ export function parseListQuery(query: Query): Result<ListQuery> {
   };
 }
 
+export interface SearchQuery {
+  q: string; // trimmed, 1..MAX_Q_LENGTH characters
+  page: number;
+  limit: number;
+  offset: number;
+}
+
+// Search policy (lecture 15): q is REQUIRED (a blank search is a client bug, not "list all";
+// use GET /events for that), trimmed, at most MAX_Q_LENGTH characters. A repeated key is
+// ambiguous and rejected. Words are matched by the database as plain tokens (no operators).
+export function parseSearchQuery(query: Query): Result<SearchQuery> {
+  const errors: FieldError[] = [];
+  const one = (key: string): string | undefined | "REPEATED" => {
+    const values = query[key];
+    if (values === undefined) return undefined;
+    if (values.length !== 1) {
+      errors.push({ path: key, code: "REPEATED", message: `${key} must not be repeated` });
+      return "REPEATED";
+    }
+    return values[0];
+  };
+  const qRaw = one("q");
+  const pageRaw = one("page");
+  const limitRaw = one("limit");
+  let q = "";
+  if (qRaw !== "REPEATED") {
+    q = (qRaw ?? "").trim();
+    if (q.length === 0) errors.push({ path: "q", code: "REQUIRED", message: "q is required and must not be blank" });
+    else if (q.length > MAX_Q_LENGTH) errors.push({ path: "q", code: "INVALID_Q", message: `q must be at most ${MAX_Q_LENGTH} characters` });
+  }
+  const page = pageRaw === "REPEATED" ? null : parsePage(pageRaw);
+  if (page && !page.ok) errors.push(...page.errors);
+  const limit = limitRaw === "REPEATED" ? null : parseLimit(limitRaw);
+  if (limit && !limit.ok) errors.push(...limit.errors);
+  if (errors.length > 0 || !page?.ok || !limit?.ok) {
+    const order = ["q", "page", "limit"];
+    errors.sort((a, b) => order.indexOf(a.path) - order.indexOf(b.path));
+    return { ok: false, errors };
+  }
+  return { ok: true, value: { q, page: page.value, limit: limit.value, offset: (page.value - 1) * limit.value } };
+}
+
 // ---------- booking exercise (pure, synthetic; no endpoint, no persistence) ----------
 
 export const MIN_QUANTITY = 1;

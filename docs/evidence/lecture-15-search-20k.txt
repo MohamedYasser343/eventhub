@@ -1,0 +1,163 @@
+date: 2026-11-23T06:36:54.752Z
+host: 12th Gen Intel(R) Core(TM) i7-1255U x12, 22.7 GiB RAM, linux 7.0.0-43-generic
+node: v24.22.1
+postgres: PostgreSQL 17.11 (Debian 17.11-1.pgdg13+2) on x86_64-pc-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit
+rows: 20000 synthetic names of 2-4 words from a 16-word vocabulary (skewed), 'zephyr' injected at ~0.04%
+note: one machine, Postgres in Docker, 15 warm runs per query via the pg client (includes client round trip); not a benchmark of production.
+
+sample names: summit summit workshop | gala workshop gala conference | night conference | summit expo expo
+table size: 1768 kB
+
+==== BEFORE the GIN index (FTS has to compute tsvectors per row) ====
+
+-- term "zephyr" (matches: 31 rows by token)
+substring position() (the list ?q= filter)    median 9.75 ms  max 10.72 ms  (15 warm runs, 10 rows returned)
+ILIKE '%term%'                                median 24.08 ms  max 26.00 ms  (15 warm runs, 10 rows returned)
+FTS ranked (production query)                 median 67.45 ms  max 90.61 ms  (15 warm runs, 10 rows returned)
+
+-- term "summit" (matches: 11638 rows by token)
+substring position() (the list ?q= filter)    median 0.79 ms  max 1.08 ms  (15 warm runs, 10 rows returned)
+ILIKE '%term%'                                median 1.10 ms  max 1.25 ms  (15 warm runs, 10 rows returned)
+FTS ranked (production query)                 median 126.10 ms  max 173.90 ms  (15 warm runs, 10 rows returned)
+
+-- term "labtop" (matches: 0 rows by token)
+substring position() (the list ?q= filter)    median 37.91 ms  max 58.60 ms  (15 warm runs, 0 rows returned)
+ILIKE '%term%'                                median 64.78 ms  max 150.20 ms  (15 warm runs, 0 rows returned)
+FTS ranked (production query)                 median 97.01 ms  max 132.36 ms  (15 warm runs, 0 rows returned)
+
+-- plan: ILIKE, "zephyr"
+Limit  (cost=471.01..471.01 rows=1 width=34) (actual time=36.401..36.406 rows=10 loops=1)
+  Buffers: shared hit=221
+  ->  Sort  (cost=471.01..471.01 rows=1 width=34) (actual time=36.398..36.401 rows=10 loops=1)
+        Sort Key: id
+        Sort Method: top-N heapsort  Memory: 25kB
+        Buffers: shared hit=221
+        ->  Seq Scan on events  (cost=0.00..471.00 rows=1 width=34) (actual time=0.481..36.330 rows=31 loops=1)
+              Filter: (name ~~* '%zephyr%'::text)
+              Rows Removed by Filter: 19969
+              Buffers: shared hit=221
+Planning Time: 0.386 ms
+Execution Time: 36.437 ms
+
+-- plan: FTS, "zephyr"
+Limit  (cost=5498.41..5498.44 rows=10 width=38) (actual time=108.967..108.972 rows=10 loops=1)
+  Buffers: shared hit=221
+  ->  Sort  (cost=5498.41..5498.66 rows=100 width=38) (actual time=108.965..108.967 rows=10 loops=1)
+        Sort Key: (ts_rank(to_tsvector('simple'::regconfig, name), '''zephyr'''::tsquery)) DESC, id
+        Sort Method: top-N heapsort  Memory: 25kB
+        Buffers: shared hit=221
+        ->  Seq Scan on events  (cost=0.00..5496.25 rows=100 width=38) (actual time=1.530..108.820 rows=31 loops=1)
+              Filter: (to_tsvector('simple'::regconfig, name) @@ '''zephyr'''::tsquery)
+              Rows Removed by Filter: 19969
+              Buffers: shared hit=221
+Planning Time: 0.126 ms
+Execution Time: 109.005 ms
+
+-- plan: ILIKE, "summit"
+Limit  (cost=0.29..0.94 rows=10 width=34) (actual time=0.037..0.067 rows=10 loops=1)
+  Buffers: shared hit=3
+  ->  Index Scan using events_pkey on events  (cost=0.29..802.29 rows=12302 width=34) (actual time=0.035..0.063 rows=10 loops=1)
+        Filter: (name ~~* '%summit%'::text)
+        Rows Removed by Filter: 7
+        Buffers: shared hit=3
+Planning Time: 0.488 ms
+Execution Time: 0.093 ms
+
+-- plan: FTS, "summit"
+Limit  (cost=5498.41..5498.44 rows=10 width=38) (actual time=216.744..216.749 rows=10 loops=1)
+  Buffers: shared hit=221
+  ->  Sort  (cost=5498.41..5498.66 rows=100 width=38) (actual time=216.742..216.744 rows=10 loops=1)
+        Sort Key: (ts_rank(to_tsvector('simple'::regconfig, name), '''summit'''::tsquery)) DESC, id
+        Sort Method: top-N heapsort  Memory: 26kB
+        Buffers: shared hit=221
+        ->  Seq Scan on events  (cost=0.00..5496.25 rows=100 width=38) (actual time=0.034..211.609 rows=11638 loops=1)
+              Filter: (to_tsvector('simple'::regconfig, name) @@ '''summit'''::tsquery)
+              Rows Removed by Filter: 8362
+              Buffers: shared hit=221
+Planning Time: 0.114 ms
+Execution Time: 216.778 ms
+
+CREATE INDEX took 148 ms; index size 128 kB
+
+==== AFTER the GIN index ====
+
+-- term "zephyr" (matches: 31 rows by token)
+substring position() (the list ?q= filter)    median 16.52 ms  max 25.58 ms  (15 warm runs, 10 rows returned)
+ILIKE '%term%'                                median 35.39 ms  max 62.91 ms  (15 warm runs, 10 rows returned)
+FTS ranked (production query)                 median 1.47 ms  max 2.45 ms  (15 warm runs, 10 rows returned)
+
+-- term "summit" (matches: 11638 rows by token)
+substring position() (the list ?q= filter)    median 0.82 ms  max 1.01 ms  (15 warm runs, 10 rows returned)
+ILIKE '%term%'                                median 1.28 ms  max 1.53 ms  (15 warm runs, 10 rows returned)
+FTS ranked (production query)                 median 42.73 ms  max 57.89 ms  (15 warm runs, 10 rows returned)
+
+-- term "labtop" (matches: 0 rows by token)
+substring position() (the list ?q= filter)    median 18.71 ms  max 19.82 ms  (15 warm runs, 0 rows returned)
+ILIKE '%term%'                                median 14.06 ms  max 22.57 ms  (15 warm runs, 0 rows returned)
+FTS ranked (production query)                 median 0.64 ms  max 3.42 ms  (15 warm runs, 0 rows returned)
+
+-- plan: ILIKE, "zephyr"
+Limit  (cost=471.01..471.01 rows=1 width=34) (actual time=24.415..24.419 rows=10 loops=1)
+  Buffers: shared hit=221
+  ->  Sort  (cost=471.01..471.01 rows=1 width=34) (actual time=24.413..24.414 rows=10 loops=1)
+        Sort Key: id
+        Sort Method: top-N heapsort  Memory: 25kB
+        Buffers: shared hit=221
+        ->  Seq Scan on events  (cost=0.00..471.00 rows=1 width=34) (actual time=0.403..24.373 rows=31 loops=1)
+              Filter: (name ~~* '%zephyr%'::text)
+              Rows Removed by Filter: 19969
+              Buffers: shared hit=221
+Planning Time: 0.340 ms
+Execution Time: 24.445 ms
+
+-- plan: FTS, "zephyr"
+Limit  (cost=109.80..109.83 rows=10 width=38) (actual time=0.294..0.297 rows=10 loops=1)
+  Buffers: shared hit=34
+  ->  Sort  (cost=109.80..109.88 rows=31 width=38) (actual time=0.293..0.294 rows=10 loops=1)
+        Sort Key: (ts_rank(to_tsvector('simple'::regconfig, name), '''zephyr'''::tsquery)) DESC, id
+        Sort Method: top-N heapsort  Memory: 25kB
+        Buffers: shared hit=34
+        ->  Bitmap Heap Scan on events  (cost=8.69..109.13 rows=31 width=38) (actual time=0.054..0.266 rows=31 loops=1)
+              Recheck Cond: (to_tsvector('simple'::regconfig, name) @@ '''zephyr'''::tsquery)
+              Heap Blocks: exact=31
+              Buffers: shared hit=34
+              ->  Bitmap Index Scan on events_name_fts_idx  (cost=0.00..8.68 rows=31 width=0) (actual time=0.022..0.022 rows=31 loops=1)
+                    Index Cond: (to_tsvector('simple'::regconfig, name) @@ '''zephyr'''::tsquery)
+                    Buffers: shared hit=3
+Planning:
+  Buffers: shared hit=1
+Planning Time: 0.157 ms
+Execution Time: 0.333 ms
+
+-- plan: ILIKE, "summit"
+Limit  (cost=0.29..0.94 rows=10 width=34) (actual time=0.030..0.057 rows=10 loops=1)
+  Buffers: shared hit=3
+  ->  Index Scan using events_pkey on events  (cost=0.29..802.29 rows=12302 width=34) (actual time=0.028..0.054 rows=10 loops=1)
+        Filter: (name ~~* '%summit%'::text)
+        Rows Removed by Filter: 7
+        Buffers: shared hit=3
+Planning Time: 0.373 ms
+Execution Time: 0.079 ms
+
+-- plan: FTS, "summit"
+Limit  (cost=6552.18..6552.21 rows=10 width=38) (actual time=57.617..57.621 rows=10 loops=1)
+  Buffers: shared hit=227
+  ->  Sort  (cost=6552.18..6581.28 rows=11638 width=38) (actual time=57.615..57.617 rows=10 loops=1)
+        Sort Key: (ts_rank(to_tsvector('simple'::regconfig, name), '''summit'''::tsquery)) DESC, id
+        Sort Method: top-N heapsort  Memory: 26kB
+        Buffers: shared hit=227
+        ->  Bitmap Heap Scan on events  (cost=86.12..6300.69 rows=11638 width=38) (actual time=1.721..53.457 rows=11638 loops=1)
+              Recheck Cond: (to_tsvector('simple'::regconfig, name) @@ '''summit'''::tsquery)
+              Heap Blocks: exact=221
+              Buffers: shared hit=227
+              ->  Bitmap Index Scan on events_name_fts_idx  (cost=0.00..83.21 rows=11638 width=0) (actual time=1.653..1.654 rows=11638 loops=1)
+                    Index Cond: (to_tsvector('simple'::regconfig, name) @@ '''summit'''::tsquery)
+                    Buffers: shared hit=6
+Planning:
+  Buffers: shared hit=1
+Planning Time: 0.129 ms
+Execution Time: 57.658 ms
+
+==== write cost ====
+insert 5000 rows with the GIN index: 189 ms
+insert 5000 rows without it:        179 ms (one run each)
