@@ -1,6 +1,6 @@
 # ADR-018: Bounded, idempotent graceful shutdown for the API and the worker
 
-Status: Proposed (implemented; awaiting owner confirmation)
+Status: Accepted (owner confirmed 2026-11-25)
 Date: 2026-11-25
 Related lecture: [19 — Graceful Shutdown](../lectures/19-graceful-shutdown.md)
 

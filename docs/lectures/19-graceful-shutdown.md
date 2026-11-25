@@ -6,7 +6,7 @@
 - Duration: 35:56.
 - Date documented: 2026-11-25.
 - Learning status: Complete (owner explicitly requested the lecture documentation upload after the explanation).
-- Implementation status: Implemented, awaiting learner review (2026-11-25); see the evidence section and ADR-018.
+- Implementation status: Complete (owner confirmed 2026-11-25); see the evidence section and ADR-018.
 - Source availability: The exact title, video URL, duration and topic outline were verified against [transcript-derived notes](https://github.com/shubhamscifi/backend_from_first_principles_notes/blob/main/19_graceful_shutdown/NOTES.md). The full auto-generated transcript was also reviewed. The original recording was not independently played during this documentation session. The notes identify several caption corrections: “radius” means Redis, “async Q” means the Asynq job library, and the code shown is a Go backend. Claims about the lecture below are grounded in those materials; additional production guidance and EventHub-specific analysis are explicitly labeled supplementary.
 
 ## Learning objectives
@@ -549,7 +549,7 @@ Do not build a new service or add deployment infrastructure. Inspect the latest 
 
 ## Implementation evidence (coding agent)
 
-Branch `feat/lecture-19-graceful-shutdown`, not committed or pushed at the time of writing. Decision record: [ADR-018](../decisions/018-graceful-shutdown.md). Environment: Node v24.22.1, local PostgreSQL test database and both Redis instances from `backend/docker-compose.yml`.
+Branch `feat/lecture-19-graceful-shutdown`, PR #17. Decision record: [ADR-018](../decisions/018-graceful-shutdown.md). Environment: Node v24.22.1, local PostgreSQL test database and both Redis instances from `backend/docker-compose.yml`.
 
 ### What changed
 - `src/lifecycle/shutdown.ts`: one coordinator (idempotent, ordered steps, one hard deadline, best-effort steps, injected `exit`, sanitized lifecycle logs). `src/lifecycle/http.ts`: HTTP steps for the native server.
@@ -589,4 +589,4 @@ Also covered: idle shutdown of the real API exits 0 with all four steps logged a
 - [x] Worker graceful shutdown reviewed/implemented and tested.
 - [x] Acceptance criteria demonstrated (see table; limits above).
 - [x] Negative cases and regression checks recorded.
-- [ ] Implementation progress updated and learner confirmed.
+- [x] Implementation progress updated and learner confirmed (2026-11-25).
