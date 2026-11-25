@@ -5,7 +5,7 @@
 - Playlist position: 20; duration: 2:50:03.
 - Date documented: 2026-11-25.
 - Learning status: Complete (owner explicitly requested GitHub upload following the explanation).
-- Implementation status: Not started for this milestone; earlier security controls already exist.
+- Implementation status: Complete (owner confirmed 2026-11-25); see implementation evidence below.
 - Source verification: The video title and position were rechecked against YouTube and the duration against the course listing and secondary notes. Third-party transcript excerpts ([Heuristica](https://www.heuristi.ca/videos/20-backend-security-everything-you-need-to-know-yt-xB1C1xZZW4k), [Transcribe](https://www.usetranscribe.io/yt/xB1C1xZZW4k/backend-security-tips)) support the broad lecture themes. The full original recording/transcript was not independently reviewed during documentation. This is the learning-session record, not a verbatim or exhaustive transcript. EventHub examples, algorithm comparisons and production recommendations below are supplementary engineering explanations.
 
 ## Learning objectives
@@ -381,9 +381,9 @@ I did not run the new limiter tests against the old code to watch them fail; the
 - Not run: a shared (Redis) limiter experiment, TLS/HSTS, proxy-trust configuration, a real HTML/cookie flow, load or brute-force timing. Limiter thresholds are reasoned, not measured.
 - Limiter state is per process; the sweep and limiter tests use an injected clock, not wall-clock waiting.
 - **Owner decision:** `POST /bookings` is an unauthenticated 501 stub. It was left unchanged because protecting it changes the contract; it should require auth when booking is implemented.
-- Learner confirmation is pending; implementation status is "awaiting learner review".
+- Owner confirmed the implementation on 2026-11-25 (PR #18 merged).
 
 - [x] Implementation or reproducible experiment.
 - [x] Acceptance criteria demonstrated (see table; limits above).
 - [x] Negative cases and regression checks completed (see results).
-- [ ] Implementation progress updated and learner confirmed.
+- [x] Implementation progress updated and learner confirmed (2026-11-25).

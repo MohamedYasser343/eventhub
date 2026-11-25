@@ -1,6 +1,6 @@
 # ADR-019: Security hardening — layered rate limits and baseline response headers
 
-Status: Proposed (awaiting owner confirmation)
+Status: Accepted (owner confirmed 2026-11-25)
 Date: 2026-11-25
 Related lecture: [20 — Backend Security](../lectures/20-backend-security.md)
 
