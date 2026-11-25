@@ -1,0 +1,29 @@
+# ADR-017: OpenTelemetry for traces and metrics, structured JSON logs
+
+Status: Accepted (owner confirmed 2026-11-25)
+Date: 2026-11-25
+Related lecture: [18 — Logging, Monitoring and Observability](../lectures/18-logging-monitoring-observability.md)
+
+## Context
+Lecture 10 gave every request an id and an optional access log; lecture 16 added an error boundary. Nothing measured latency or error rate, a request's work could not be followed across layers, and worker jobs were logged without the request that caused them. A first version used hand-written telemetry; the owner then asked for OpenTelemetry, which supersedes it (the hand-written metrics/trace modules were removed).
+
+## Decision
+- **Instrumentation = OpenTelemetry JS** (`@opentelemetry/api` 1.9.1, `sdk-trace-base` 2.x, `sdk-metrics` 2.x, `context-async-hooks`, `core`, `resources`, `exporter-prometheus` 0.223). Exporters are swappable, so a Collector/Tempo/Prometheus can be added later without changing instrumented code. All OTel setup is in `src/observability/otel.ts`.
+- **Version pins:** newest `sdk-metrics` 3.x and `exporter-prometheus` 0.30x need `api` 1.10, while `sdk-trace-base` 2.x needs `api` < 1.10 and npm refuses the mix. So the whole 2.x generation (`api` 1.9.1, exporter 0.223.x) is used. Revisit when `sdk-trace-base` supports `api` 1.10.
+- **No auto-instrumentation packages, no global provider registration.** Spans are created manually at two boundaries (HTTP request, one DB call); only the context manager (AsyncLocalStorage) and the W3C propagator are registered globally.
+- **Logs stay our own structured logger** (OTel logs SDK is not used): one JSON line per event with `timestamp`, `level`, stable `event`, `service`, `requestId` (request scope) and `traceId` (the ACTIVE OTel span). Fields with sensitive KEYS (password, token, authorization, cookie, secret, api key, card, jwt ...) are `[REDACTED]` at any depth; strings are control-character-stripped and capped; an `Error` logs as its class name only. `LOG_LEVEL` (`debug|info|warn|error`, default `info`) is validated by `config.ts`. `logSink` moved to `logger.ts` and is still re-exported by `server.ts`.
+- **Severity:** 5xx = `error`, aborted = `warn`, everything else including 4xx = `info` (expected outcomes). A failure is logged once, at the error boundary.
+- **Traces:** SERVER root span per request, named `"<METHOD> <route template>"`, created in `observe` (outside the error boundary, so 500/503 are recorded); child span `db.events.findById` (attributes: system + operation only, never SQL parameters). Error status = 5xx / thrown error; the error span carries `error.type` (class name), never the message. Only the `traceparent` header is handed to the W3C propagator (`tracestate`/baggage never read, nothing echoed); malformed or all-zero values give a new trace. A remote parent with the unsampled flag is respected by the default ParentBased sampler (no span recorded; the log line still carries its trace id).
+- **Metrics (OTel SDK -> Prometheus text):** histogram `http.server.request.duration` (s; attributes method, route TEMPLATE or `unmatched`, status class `2xx`.. or `aborted`; unknown methods become `OTHER`), up-down counter `http.server.active_requests`, counter `eventhub.job.attempts{type,outcome}`, histogram `eventhub.job.attempt.duration{type}`, counter `eventhub.telemetry.dropped{signal}`. Prometheus names are `http_server_request_duration_{bucket,sum,count}`, `eventhub_job_attempts_total`, ... (this exporter version does not append `_seconds`; the unit is in the `# UNIT` line). Request ids, job ids, event ids, user ids are never attributes. Each instrument has `aggregationCardinalityLimit` 200: extra series fold into one `otel_metric_overflow="true"` series.
+- **Exposure:** `GET /internal/metrics`, admin session required (401 anonymous, 403 non-admin). The Prometheus exporter is created with `preventServerStart` (no extra listening port); we call `collect()` and serialize behind the admin check.
+- **Bounded export:** `BatchSpanProcessor` (batch 100, 1 s schedule) behind a guard that allows at most 500 ended-but-unexported spans (a further span is dropped and counted); the exporter wrapper enforces a 1 s timeout per batch, no retries, and counts a throwing/rejecting/timed-out batch as dropped. Default sink: in-memory ring of the 500 newest spans (tests and `npm run experiment:observability`).
+- **Duration once:** one finalize guard on `finish`/`close`, so failed and aborted requests are measured exactly once.
+- **Worker:** `telemetryLogger` (default for `startWorker`) emits `job.active|completed|retry_scheduled|failed` with job id, attempt, duration and a shape-checked `correlationId`, and records the job metrics. `worker-main.ts` writes JSON lines with `service: "worker"`; job metrics live in the worker process (no endpoint there yet).
+
+## Consequences / limitations
+- Seven new runtime dependencies (OTel packages) and an `api` version pin forced by peer ranges; `npm install` may need the same pins.
+- Metrics are per process and reset on restart; nothing scrapes, stores, graphs or alerts on them. Spans go nowhere durable (in-memory ring) until an OTLP exporter + Collector is added (deferred).
+- Only ONE database call is spanned; list/search/write/ticket paths and the cache lookup have no child spans. The worker does not continue the HTTP trace (only `correlationId` is carried; no real enqueue path exists because `POST /bookings` is a stub).
+- Redaction is key-based: a secret inside a free-text VALUE under an innocent key is not detected.
+- `resetMetrics()`/`resetSpanExporter()` exist for tests and rebuild the meter provider; they are not production switches. Tests inject faults by patching `pool.query` in the test process.
+- Not done (deferred by the note): OTLP/Collector, Prometheus/Grafana/Loki/Tempo, auto-instrumentation, OTel logs, sampling policy, SLOs, alert rules, paid APM.

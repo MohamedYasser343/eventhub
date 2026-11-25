@@ -1,4 +1,5 @@
 import type pg from "pg";
+import { withSpan } from "../../observability/otel.ts";
 import type { EventFields, ListQuery, SearchQuery } from "../../validation.ts";
 
 export interface EventItem {
@@ -35,7 +36,11 @@ export class PgEventRepository implements EventRepository {
   constructor(private readonly pool: pg.Pool) {}
 
   async findById(id: number) {
-    return (await this.pool.query<EventItem>(`SELECT ${COLUMNS} FROM events WHERE id = $1`, [id])).rows[0];
+    // Lecture 18: one child span per database call. Attributes are the operation name only:
+    // never SQL parameters or row data.
+    return withSpan("db.events.findById", { "db.system": "postgresql", "db.operation": "SELECT" }, async () =>
+      (await this.pool.query<EventItem>(`SELECT ${COLUMNS} FROM events WHERE id = $1`, [id])).rows[0],
+    );
   }
   async findAll() {
     return (await this.pool.query<EventItem>(`SELECT ${COLUMNS} FROM events ORDER BY id`)).rows;

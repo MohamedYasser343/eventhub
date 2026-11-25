@@ -9,11 +9,15 @@ import { cache, cacheTtlSeconds } from "./cache.ts";
 import { loadConfig, parseServerConfig } from "./config.ts";
 import { seedDemo } from "./db/seed.ts";
 import { PgUserRepository } from "./modules/auth/user-repository.ts";
-import { createProtect, ignoredBodyHeaders, sendJson } from "./http/app.ts";
+import { createProtect, forbidden, ignoredBodyHeaders, sendJson } from "./http/app.ts";
 import type { AppHandler, RouteContext } from "./http/app.ts";
 import { createRequestContext } from "./http/context.ts";
 import { compose } from "./http/middleware.ts";
 import { createErrorBoundary } from "./http/error-boundary.ts";
+import { log, logSettings, logSink } from "./observability/logger.ts";
+import { m, methodLabel, renderMetrics, SpanStatusCode, startRequestSpan, statusClass } from "./observability/otel.ts";
+import { runInScope } from "./observability/scope.ts";
+import { context } from "@opentelemetry/api";
 import { createReadyHandler, liveHandler } from "./http/health.ts";
 import type { Middleware } from "./http/middleware.ts";
 import { createAuthController } from "./modules/auth/controller.ts";
@@ -28,10 +32,14 @@ import { InMemoryTicketRepository } from "./modules/tickets/repository.ts";
 import { TicketService } from "./modules/tickets/service.ts";
 
 export type { EventItem, RouteContext };
+export { logSink }; // moved to observability/logger.ts in lecture 18; still importable from here
 
 
 // Lecture 17: validated once, before anything is wired or listening.
 const config = loadConfig(parseServerConfig);
+logSettings.level = config.logLevel;
+// One JSON line per event; null (the default, LOG_REQUESTS=0) disables output entirely.
+if (config.logRequests) logSink.write = (line) => console.log(line);
 
 // ---------- composition root ----------
 // The only place where concrete classes are chosen and wired, by hand (no DI
@@ -39,7 +47,7 @@ const config = loadConfig(parseServerConfig);
 export const auth = new AuthService(new PgUserRepository(pool));
 // Cache failures are logged as ids + operation only (never keys' values or the URL).
 export const publicEventCache = new PublicEventCache(cache, cacheTtlSeconds, (what, id) =>
-  logSink.write?.(JSON.stringify({ level: "warn", cache: what, eventId: id })),
+  log("warn", "cache.degraded", { cache: what, eventId: id }),
 );
 const eventService = new EventService(new PgEventRepository(pool), publicEventCache);
 const ticketService = new TicketService(new InMemoryTicketRepository(ticketsByUser), eventService);
@@ -158,6 +166,19 @@ export const router = new Router<AppHandler>();
 router.add("GET", "/health", (_req, res) => sendJson(res, 200, { status: "ok" }));
 router.add("GET", "/health/live", liveHandler); // lecture 16: process answers
 router.add("GET", "/health/ready", createReadyHandler(pool)); // lecture 16: PostgreSQL reachable (bounded)
+// Lecture 18: operational metrics are not public (they reveal routes, volume and failure rates).
+// Admin session required; there is deliberately no unauthenticated variant.
+router.add(
+  "GET",
+  "/internal/metrics",
+  protect((req, res, ctx) => {
+    if (ctx.user.role !== "admin") return forbidden(req, res);
+    return renderMetrics().then((body) => {
+      res.writeHead(200, { "Content-Type": "text/plain; version=0.0.4; charset=utf-8", "Content-Length": Buffer.byteLength(body), "Cache-Control": "no-store" });
+      res.end(body);
+    });
+  }),
+);
 registerEventRoutes(router, false); // legacy, unversioned (kept for lecture 05 clients)
 registerEventRoutes(router.group("/api/v1"), true); // "/api/v2" is not implemented: 404
 
@@ -170,27 +191,47 @@ registerEventRoutes(router.group("/api/v1"), true); // "/api/v2" is not implemen
 // Global middleware runs for every request, including 404/405. Route middleware
 // runs only for the matched route, so public routes stay public.
 
-// One JSON line per finished request; null disables. Never logs the query string,
-// headers (Authorization), or bodies: only ids, method, path, status, timing.
-export const logSink: { write: ((line: string) => void) | null } = {
-  write: config.logRequests ? (line) => console.log(line) : null,
-};
-
+// Lecture 18: the root of every trace and the source of every request metric. It sits OUTSIDE the
+// error boundary so that a 500/503 produced by the boundary is still measured and logged, and it
+// finalizes exactly once whether the response finished or the client went away.
 const observe: Middleware<RouteContext> = async (req, res, ctx, next) => {
   res.setHeader("X-Request-Id", ctx.requestId); // on every response, set before anything can reply
-  res.on("finish", () => {
-    logSink.write?.(
-      JSON.stringify({
-        requestId: ctx.requestId,
+  // An incoming traceparent is untrusted: extractParent() accepts only a well-formed one.
+  const method = methodLabel(req.method);
+  const { span: root, ctx: traceCtx } = startRequestSpan(req.headers["traceparent"], method);
+  m.httpActive.add(1);
+  let finalized = false;
+  const finalize = (aborted: boolean): void => {
+    if (finalized) return;
+    finalized = true;
+    m.httpActive.add(-1);
+    const durationMs = Date.now() - ctx.startedAt;
+    const status = aborted ? 499 : res.statusCode; // 499 = client closed the request (nothing was sent)
+    const route = ctx.route; // a template or "unmatched": never the raw URL
+    m.httpDuration.record(durationMs / 1000, { "http.request.method": method, "http.route": route, "http.response.status_class": aborted ? "aborted" : statusClass(status) });
+    root.updateName(`${method} ${route}`);
+    root.setAttribute("http.route", route);
+    root.setAttribute("http.response.status_code", status);
+    if (status >= 500) root.setStatus({ code: SpanStatusCode.ERROR });
+    // The completion record is written while the root span is still the active context.
+    context.with(traceCtx, () => {
+      // 5xx: error. 4xx (validation, auth, not-found) are EXPECTED outcomes of a working server: info.
+      const level = status >= 500 ? "error" : aborted ? "warn" : "info";
+      log(level, aborted ? "request.aborted" : "request.completed", {
         method: req.method,
+        // pathname only: the query string may carry data and is never logged
         path: new URL(req.url?.startsWith("/") ? `http://x${req.url}` : "http://x/", "http://x").pathname,
-        status: res.statusCode,
-        durationMs: Date.now() - ctx.startedAt,
+        route,
+        status,
+        durationMs,
         userId: ctx.user?.id ?? null,
-      }),
-    );
-  });
-  await next();
+      });
+    });
+    root.end();
+  };
+  res.once("finish", () => finalize(false));
+  res.once("close", () => finalize(!res.writableFinished));
+  await context.with(traceCtx, () => runInScope({ requestId: ctx.requestId }, next));
 };
 
 const cors: Middleware<RouteContext> = async (req, res, _ctx, next) => {
@@ -199,7 +240,7 @@ const cors: Middleware<RouteContext> = async (req, res, _ctx, next) => {
 };
 
 // Lecture 16: see http/error-boundary.ts (500 for bugs, 503 when PostgreSQL is unreachable).
-const errorBoundary = createErrorBoundary((record) => logSink.write?.(JSON.stringify(record)));
+const errorBoundary = createErrorBoundary();
 
 function dispatch(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> | void {
   // Origin-form targets start with "/". Parse them against a fixed host so a
@@ -219,6 +260,7 @@ function dispatch(req: IncomingMessage, res: ServerResponse, ctx: RouteContext):
       ctx.query = parseQuery(url.searchParams);
       ctx.allow = result.allow;
       ctx.prefix = result.prefix;
+      ctx.route = result.template;
       return result.handler(req, res, ctx);
     case "method-not-allowed":
       return methodNotAllowed(res, result.allow);
@@ -238,6 +280,7 @@ export const server = createServer((req, res) => {
     query: Object.create(null) as Query,
     allow: "",
     prefix: "",
+    route: "unmatched",
   };
   // errorBoundary handles handler errors; this catch is only a last resort.
   pipeline(req, res, ctx).catch(() => res.destroy());

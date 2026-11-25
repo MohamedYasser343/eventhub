@@ -8,6 +8,9 @@
 // error (never a silent fallback). Error messages name the KEY and the rule, never the value:
 // values may carry passwords (connection URLs).
 
+import { LOG_LEVELS } from "./observability/logger.ts";
+import type { LogLevel } from "./observability/logger.ts";
+
 type Env = Readonly<Record<string, string | undefined>>;
 
 export class ConfigError extends Error {
@@ -135,6 +138,7 @@ export interface ServerConfig {
   port: number;
   corsOrigin: string;
   logRequests: boolean;
+  logLevel: LogLevel;
   seedDemoUsers: boolean;
 }
 export function parseServerConfig(env: Env): ServerConfig {
@@ -143,10 +147,11 @@ export function parseServerConfig(env: Env): ServerConfig {
   const port = r.int("PORT", 8080, 1, 65_535);
   const corsOrigin = r.string("CORS_ORIGIN", "http://localhost:3000", isHttpOrigin, "must be an http(s) origin such as http://localhost:3000 (no path)");
   const logRequests = r.flag01("LOG_REQUESTS");
+  const logLevel = r.oneOf("LOG_LEVEL", LOG_LEVELS, "info");
   const seedDemoUsers = r.flag01("SEED_DEMO_USERS");
   // Cross-field rule: demo users have generated passwords printed to stdout; never in production.
   if (appEnv === "production" && seedDemoUsers) r.problems.push("SEED_DEMO_USERS must be 0 when APP_ENV=production");
-  return r.done({ appEnv, port, corsOrigin, logRequests, seedDemoUsers });
+  return r.done({ appEnv, port, corsOrigin, logRequests, logLevel, seedDemoUsers });
 }
 
 // ---------- queue producer / worker (lecture 14; its OWN Redis, never the cache's) ----------
@@ -160,6 +165,7 @@ export interface WorkerConfig extends QueueConfig {
   lockDurationMs: number | undefined;
   stalledIntervalMs: number | undefined;
   concurrency: number | undefined;
+  logLevel: LogLevel;
 }
 const readQueue = (r: Reader): QueueConfig => ({
   queueRedisUrl: r.requiredString("QUEUE_REDIS_URL", isRedisUrl, "must be a redis:// or rediss:// URL"),
@@ -179,6 +185,7 @@ export function parseWorkerConfig(env: Env): WorkerConfig {
     lockDurationMs: r.optInt("WORKER_LOCK_MS", 1, 3_600_000),
     stalledIntervalMs: r.optInt("WORKER_STALLED_MS", 1, 3_600_000),
     concurrency: r.optInt("WORKER_CONCURRENCY", 1, 1_000),
+    logLevel: r.oneOf("LOG_LEVEL", LOG_LEVELS, "info"),
   };
   return r.done(cfg);
 }

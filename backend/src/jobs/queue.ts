@@ -9,6 +9,8 @@ import {
   type EmailProvider,
   type NotificationPayload,
 } from "./notification.ts";
+import { log } from "../observability/logger.ts";
+import { m } from "../observability/otel.ts";
 
 // Lecture 14: producer + worker on BullMQ, over a DURABLE Redis that is NOT the cache
 // Redis (see ADR-013). Queue data and cache data never share an instance.
@@ -27,11 +29,32 @@ export interface JobLogEvent {
   type: string;
   state: JobState;
   attempt: number; // 1-based try number
+  correlationId?: string; // from the payload (validated id shape): ties the job to the request that enqueued it
   durationMs: number;
   reason?: string; // sanitized: error class + short message, never a stack or the payload
 }
 export type JobLogger = (e: JobLogEvent) => void;
 export const consoleLogger: JobLogger = (e) => console.log(JSON.stringify({ ts: new Date().toISOString(), ...e }));
+
+// Lecture 18: the worker's default logger emits structured records (stable event names) and
+// updates job metrics. Labels are the job TYPE and OUTCOME only; job ids and correlation ids
+// go in the log line, never in a metric label (unbounded cardinality).
+export const telemetryLogger: JobLogger = (e) => {
+  if (e.state !== "active") {
+    m.jobAttempts.add(1, { type: e.type, outcome: e.state });
+    m.jobDuration.record(e.durationMs / 1000, { type: e.type });
+  }
+  const level = e.state === "failed" ? "error" : e.state === "retry_scheduled" ? "warn" : "info";
+  log(level, `job.${e.state}`, { jobId: e.jobId, type: e.type, attempt: e.attempt, durationMs: e.durationMs, ...(e.correlationId ? { correlationId: e.correlationId } : {}), ...(e.reason ? { reason: e.reason } : {}) });
+};
+
+// Only a payload-shaped id is copied into telemetry (the payload was validated at enqueue, but
+// a hand-crafted job in Redis is still untrusted input).
+const SAFE_CORRELATION = /^[A-Za-z0-9_-]{1,64}$/;
+function correlationOf(data: unknown): { correlationId: string } | Record<string, never> {
+  const id = (data as { correlationId?: unknown } | null)?.correlationId;
+  return typeof id === "string" && SAFE_CORRELATION.test(id) ? { correlationId: id } : {};
+}
 
 // ---------- producer ----------
 export class EnqueueError extends Error {}
@@ -101,7 +124,7 @@ export interface WorkerOptions {
 }
 
 export function startWorker(o: WorkerOptions): Worker {
-  const log = o.log ?? consoleLogger;
+  const log = o.log ?? telemetryLogger;
   const worker = new Worker(
     o.name ?? QUEUE_NAME,
     async (job) => {
@@ -130,9 +153,9 @@ export function startWorker(o: WorkerOptions): Worker {
     },
   );
   worker.on("error", () => {});
-  worker.on("active", (job) => log({ jobId: String(job.id), type: job.name, state: "active", attempt: job.attemptsMade + 1, durationMs: 0 }));
+  worker.on("active", (job) => log({ jobId: String(job.id), type: job.name, state: "active", attempt: job.attemptsMade + 1, durationMs: 0, ...correlationOf(job.data) }));
   worker.on("completed", (job) =>
-    log({ jobId: String(job.id), type: job.name, state: "completed", attempt: job.attemptsMade, durationMs: (job.finishedOn ?? Date.now()) - (job.processedOn ?? Date.now()) }),
+    log({ jobId: String(job.id), type: job.name, state: "completed", attempt: job.attemptsMade, durationMs: (job.finishedOn ?? Date.now()) - (job.processedOn ?? Date.now()), ...correlationOf(job.data) }),
   );
   worker.on("failed", (job, err) => {
     if (!job) return;
@@ -144,6 +167,7 @@ export function startWorker(o: WorkerOptions): Worker {
       attempt: job.attemptsMade,
       durationMs: Date.now() - (job.processedOn ?? Date.now()),
       reason: describe(err),
+      ...correlationOf(job.data),
     });
   });
   return worker;

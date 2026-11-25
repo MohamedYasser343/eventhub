@@ -17,6 +17,7 @@ export interface RouteContext extends RequestContext {
   query: Query;
   allow: string;
   prefix: string; // "" for the legacy routes, "/api/v1" for v1
+  route: string; // matched route TEMPLATE ("/api/v1/events/:id"), or "unmatched": the bounded telemetry label
 }
 export type AppHandler = (req: IncomingMessage, res: ServerResponse, ctx: RouteContext) => void | Promise<void>;
 export type Authed = RouteContext & { user: NonNullable<RequestContext["user"]>; token: string };

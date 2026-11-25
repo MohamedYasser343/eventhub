@@ -30,6 +30,7 @@ interface Route<H> {
   constraints: Constraints;
   handler: H;
   prefix: string;
+  template: string; // e.g. "/api/v1/events/:id": a bounded label for metrics and traces
 }
 
 export type MatchResult<H> =
@@ -40,6 +41,7 @@ export type MatchResult<H> =
       // Allowed methods for this path, canonical order ("GET, HEAD, ...").
       allow: string;
       prefix: string;
+      template: string;
     }
   | { kind: "method-not-allowed"; allow: string }
   | { kind: "not-found" }
@@ -125,6 +127,7 @@ export class Router<H> implements Registrar<H> {
       constraints,
       handler,
       prefix,
+      template: prefix + path,
     });
   }
 
@@ -162,6 +165,7 @@ export class Router<H> implements Registrar<H> {
         params: found.params,
         allow,
         prefix: found.route.prefix,
+        template: found.route.template,
       };
     }
     return methods.size > 0 ? { kind: "method-not-allowed", allow } : { kind: "not-found" };
