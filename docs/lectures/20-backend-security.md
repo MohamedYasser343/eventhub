@@ -294,11 +294,96 @@ Inspect route inventory and actual tests before deciding changes. Preserve exist
 - [x] Conceptual notes, source limitations, discussion and assignment documented.
 - [x] Learning progress updated independently in docs/PROGRESS.md.
 
-## Implementation evidence (coding agent; pending)
+## Implementation evidence (coding agent)
 
-Preserve the teaching material. Append findings, changes, environment, commands, expected/observed results, negative cases, regression checks, decisions and evidence links. Mark anything not run.
+Environment: Linux, Node/TypeScript native `node:http`, PostgreSQL 17 and Redis 7 via `npm run db:up`, branch `feat/lecture-20-security`. Synthetic users only. This is a targeted hardening review of the existing backend, **not** a complete security audit or certification. Decision record: [ADR-019](../decisions/019-security-hardening.md).
 
-- [ ] Implementation or reproducible experiment.
-- [ ] Acceptance criteria demonstrated.
-- [ ] Negative cases and regression checks completed.
+### Threat model (compact)
+
+| Item | EventHub today |
+| --- | --- |
+| Actors | Anonymous caller; attendee; organizer; admin; an attacker with direct HTTP access (not the UI); operator. |
+| Trust boundary | Every HTTP request (method, path, query, headers, JSON body). Internal dependencies (PostgreSQL, Redis) are trusted but may fail. |
+| Protected data | Password hashes, session tokens, other users' tickets, event ownership, metrics. |
+| Credentials | Opaque Bearer session (random 32 bytes, SHA-256 digest stored in memory, 15 min TTL); scrypt N=16384 r=8 p=1 with random 16-byte salt; JWT only in the lecture 08 lab. |
+| Resource abuse | scrypt per login/registration (CPU), DB INSERT per registration, request bodies (bounded in `json.ts`), search/list queries (allowlisted sort, bounded pagination). |
+| Browser transport | Explicit `Authorization: Bearer` header, JSON responses only. No cookies and no HTML are served. |
+
+### Route inventory (v1; the unversioned legacy event routes mirror the event rows)
+
+| Route | Access | Object / field rules |
+| --- | --- | --- |
+| `GET /health`, `/health/live`, `/health/ready` | public | no data beyond status |
+| `GET /internal/metrics` | admin only (401/403) | not public: reveals routes and volume |
+| `GET /events`, `/events/search`, `/events/:id`, `/events/:id/tickets` | public | public event fields only (`validation.ts` projection); sort/filter allowlisted |
+| `POST /events` | organizer or admin | `ownerId` is the verified caller; body owner/role fields ignored |
+| `PUT/PATCH /events/:id` | admin, or organizer who owns it | 403 for another organizer; 404 first for a missing event |
+| `DELETE /events/:id` | admin only | 404 for missing, 403 otherwise |
+| `POST /auth/register` | public, **rate limited (new)** | role always `attendee`; body role ignored |
+| `POST /auth/login` | public, rate limited (extended) | same 401 for unknown user and wrong password |
+| `POST /auth/logout`, `GET /auth/me` | any authenticated | server-side revocation |
+| `GET /me/tickets`, `GET /tickets/:id` | authenticated | caller's own tickets only; someone else's id is 404 |
+| `POST /bookings` | **public 501 stub** | see owner decision below |
+
+### Findings and changes
+
+| # | Finding (verified in code) | Change |
+| --- | --- | --- |
+| 1 | Login limiter key was `address\|username`; one address could try unlimited usernames, each costing a scrypt run. | New per-address failure limit (20/min), checked before scrypt; a successful login does not reset it. |
+| 2 | On overflow the limiter called `hits.clear()`, erasing every existing lockout; junk keys could therefore unlock a brute-force target. | `FixedWindowLimiter`: evict expired entries, then the oldest; never clear all. Residual risk in the ADR. |
+| 3 | `POST /auth/register` ran scrypt + INSERT with no limit. | 20 attempts/address/minute (validated attempts only), 429 + `Retry-After`. |
+| 4 | No `nosniff`/CSP on responses. | Set at the top of the `createServer` callback so every response has them (also 503 drain, 204, metrics). No HSTS (plain HTTP on loopback). |
+| 5 | Expired sessions were removed only when their token was presented again. | Sweep at most once a minute in `createSession`. |
+
+Files: `src/auth.ts`, `src/modules/auth/service.ts`, `src/modules/auth/controller.ts`, `src/server.ts`, new `test/security.test.ts`.
+
+### Acceptance criteria evidence
+
+Rows already covered by earlier tests were re-run unchanged in the full suite; they were **not** rewritten.
+
+| Criterion | Evidence |
+| --- | --- |
+| Unauthenticated protected request -> 401, no mutation | `test/auth.test.ts` "missing, malformed, tampered and unknown tokens are 401..."; legacy routes "no bypass" |
+| Organizer B / attendee denied, no state change | `test/auth.test.ts` "attendee cannot create...", "organizer owns what they create..."; new `security.test.ts` "a refused cross-owner mutation leaves the stored event byte-for-byte unchanged" (PUT, PATCH, DELETE) |
+| Non-writable role/owner fields | `test/auth.test.ts` "client-supplied owner/role fields...", "register: ... role from body ignored" |
+| SQL-like input is data | `test/postgres.test.ts` (`DROP TABLE`, `' OR 1=1 --`, sort/minSeats injection), `test/search.test.ts` |
+| Invalid/expired session, JWT tampering, logout, role changes | `test/auth.test.ts` (expiry, logout, demotion), `test/jwt-lab.test.ts` (alg none, wrong key/issuer/audience, expiry, stale role) |
+| Password edge cases, no plaintext | `test/auth.test.ts` (distinct salted hashes, 422 bounds); new log test: password, wrong password and token never appear in debug-level logs |
+| Login limit 429 + Retry-After, resume, key isolation | `test/auth.test.ts` (5 failures); new: boundary, key isolation, address spray, success does not reset the address counter, overflow keeps lockout |
+| CORS / untrusted Origin | `test/head-options-cors.test.ts` |
+| Forced internal failure is generic | `test/error-handling.test.ts` "unexpected error -> generic 500...nothing leaked"; `test/observability.test.ts` redaction |
+| Public/protected serialization and cache | `test/caching.test.ts`, `test/serialization.test.ts` (unchanged, passing) |
+| Private bookings/tickets | Bookings are a 501 stub (deferred); tickets IDOR covered by `test/auth.test.ts` "tickets: only the caller's own..." |
+| Response hardening | New: nosniff + CSP on 200, 201, 204, 401, 404, 405, 422 |
+| Previous behavior | Full suite below |
+
+### Commands and results
+
+| Command (in `backend/`) | Result |
+| --- | --- |
+| `npm test` (baseline, before changes) | 325/325 pass |
+| `npx tsx --env-file-if-exists=.env --import ./test/setup.ts --test --test-concurrency=1 test/security.test.ts` | 12/12 pass |
+| `npm test` (after changes) | 337/337 pass, 0 fail (one run; the known flaky jobs test did not fail in this run) |
+| `npm run typecheck` | clean |
+| `npm audit --omit=dev` | found 0 vulnerabilities |
+
+I did not run the new limiter tests against the old code to watch them fail; the overflow test is written to fail under the previous `clear()` behaviour by construction.
+
+### Reviewed, no change needed (documented)
+
+- SQL: every value is bound (`$n`); the only interpolated fragments are `COLUMNS`, the `ORDER BY` text from the `SORT_SQL` allowlist, and direction. No shell execution exists in `src/`.
+- Ports: `docker-compose.yml` binds PostgreSQL and both Redis instances to `127.0.0.1` only; passwords come from `backend/.env` (gitignored), `.env.example` contains a placeholder. `npm audit --omit=dev`: 0 vulnerabilities (run 2026-11-25).
+- Runtime DB privilege: one `eventhub` role does migrations and runtime in local dev. A separate least-privilege runtime role is a deployment-time step, not done here.
+- Cookies, CSRF, XSS: not applicable now (Bearer header, JSON only, no HTML). Required when cookie auth or a rendered frontend is introduced: `HttpOnly; Secure; SameSite` cookies, CSRF tokens, output encoding and CSP for HTML.
+
+### Honest limits
+
+- Not run: a shared (Redis) limiter experiment, TLS/HSTS, proxy-trust configuration, a real HTML/cookie flow, load or brute-force timing. Limiter thresholds are reasoned, not measured.
+- Limiter state is per process; the sweep and limiter tests use an injected clock, not wall-clock waiting.
+- **Owner decision:** `POST /bookings` is an unauthenticated 501 stub. It was left unchanged because protecting it changes the contract; it should require auth when booking is implemented.
+- Learner confirmation is pending; implementation status is "awaiting learner review".
+
+- [x] Implementation or reproducible experiment.
+- [x] Acceptance criteria demonstrated (see table; limits above).
+- [x] Negative cases and regression checks completed (see results).
 - [ ] Implementation progress updated and learner confirmed.

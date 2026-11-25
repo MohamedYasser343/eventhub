@@ -8,8 +8,11 @@ export function createAuthController(accounts: AccountService) {
     async register(req: IncomingMessage, res: ServerResponse): Promise<void> {
       const body = await readJson(req, res);
       if (!body) return;
-      const r = await accounts.register(body.value);
+      const r = await accounts.register(body.value, req.socket.remoteAddress ?? "?");
       if (r.ok) return sendJson(res, 201, r.user, NO_STORE);
+      if (r.kind === "rate-limited") {
+        return sendJson(res, 429, { error: "Too Many Requests" }, { ...NO_STORE, "Retry-After": String(r.retryAfter) });
+      }
       if (r.kind === "invalid") return sendJson(res, 422, { error: "Unprocessable Content", details: r.details }, NO_STORE);
       sendJson(res, 409, { error: "Username already taken" }, NO_STORE);
     },

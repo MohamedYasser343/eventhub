@@ -278,6 +278,11 @@ function dispatch(req: IncomingMessage, res: ServerResponse, ctx: RouteContext):
 const pipeline = compose<RouteContext>([observe, cors, errorBoundary], dispatch);
 
 export const server = createServer((req, res) => {
+  // Lecture 20: baseline hardening on EVERY response (also 503 drain, 204, metrics text). A JSON API
+  // never needs to be sniffed as HTML or framed. No HSTS: this listener is plain HTTP on loopback;
+  // HSTS belongs to the TLS-terminating deployment layer (ADR-019).
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
   // Lecture 19: a request that arrives on an already-open keep-alive connection after draining
   // started is NOT admitted: 503 + close. (Requests accepted before the signal run to completion.)
   // /health/ready stays routed so the probe can report "draining" itself.
