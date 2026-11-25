@@ -30,8 +30,14 @@ export async function dbReady(db: Pinger, timeoutMs = READINESS_TIMEOUT_MS): Pro
 export const liveHandler = (_req: IncomingMessage, res: ServerResponse): void =>
   sendJson(res, 200, { status: "alive" }, { "Cache-Control": "no-store" });
 
-export function createReadyHandler(db: Pinger, timeoutMs = READINESS_TIMEOUT_MS) {
+// Lecture 19: while the process is shutting down it is alive but must receive no new traffic,
+// so readiness says "draining" (503) WITHOUT touching the database.
+export function createReadyHandler(db: Pinger, timeoutMs = READINESS_TIMEOUT_MS, isDraining: () => boolean = () => false) {
   return async (_req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    if (isDraining()) {
+      sendJson(res, 503, { status: "draining" }, { "Cache-Control": "no-store", Connection: "close" });
+      return;
+    }
     const ok = await dbReady(db, timeoutMs);
     // Which dependency failed is reported by name only: no host, no error text.
     sendJson(res, ok ? 200 : 503, { status: ok ? "ready" : "not_ready", checks: { database: ok ? "up" : "down" } }, { "Cache-Control": "no-store" });

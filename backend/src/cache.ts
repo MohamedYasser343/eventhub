@@ -10,6 +10,8 @@ export interface Cache {
   del(key: string): Promise<void>;
   // Test/maintenance helper: SCAN + DEL of one key prefix only (never FLUSHALL).
   deletePrefix(prefix: string): Promise<void>;
+  // Lecture 19: optional lifecycle hook. The no-op cache holds no connection and has none.
+  close?(): Promise<void>;
 }
 
 // Used when REDIS_URL is not set: every read is a miss, writes are dropped.
@@ -70,8 +72,21 @@ export class RedisCache implements Cache {
       if (keys.length > 0) await this.client.del(keys);
     }
   }
+  // Lecture 19: QUIT lets a command already sent finish; destroy() is the fallback when the
+  // connection is down or QUIT does not answer in time (the process is leaving anyway).
   async close(): Promise<void> {
-    this.client.destroy();
+    if (!this.client.isOpen) return;
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        this.client.quit(),
+        new Promise<never>((_, rej) => (timer = setTimeout(() => rej(new Error("quit timeout")), this.timeoutMs * 5))),
+      ]);
+    } catch {
+      this.client.destroy();
+    } finally {
+      clearTimeout(timer);
+    }
   }
 }
 

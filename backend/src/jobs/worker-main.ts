@@ -1,6 +1,7 @@
 import { loadConfig, parseWorkerConfig } from "../config.ts";
 import { pool } from "../db/pool.ts";
 import { logSettings, logSink } from "../observability/logger.ts";
+import { createShutdown, installSignalHandlers, lifecycleLog } from "../lifecycle/shutdown.ts";
 import { MockEmailProvider } from "./notification.ts";
 import { QUEUE_NAME, startWorker } from "./queue.ts";
 
@@ -23,10 +24,21 @@ const worker = startWorker({
   ...(cfg.concurrency !== undefined ? { concurrency: cfg.concurrency } : {}),
 });
 
-// Clean stop: finish the job in hand, then exit (SIGKILL is the crash experiment).
-for (const sig of ["SIGINT", "SIGTERM"] as const) {
-  process.on(sig, () => {
-    void worker.close().then(() => pool.end()).then(() => process.exit(0));
-  });
-}
+// Lecture 19: graceful stop, a separate process with its own sequence. Order = dependency order:
+//   1. worker.close(): stops fetching new jobs and WAITS for the active job(s) (BullMQ default);
+//      the job handlers use PostgreSQL, so the pool must outlive this step;
+//   2. pool.end(): only now that no handler can need a connection.
+// Deadline: if a job cannot finish in time the process exits 1 and the job is left active in Redis;
+// its lock expires and stalled-job recovery re-runs it (idempotency keeps the effect single), exactly
+// as after SIGKILL. SIGKILL itself cannot be handled: that path is the crash experiment of lecture 14.
+const shutdown = createShutdown({
+  deadlineMs: cfg.shutdownTimeoutMs,
+  log: lifecycleLog,
+  exit: (code) => process.exit(code),
+  steps: [
+    { name: "worker-close", run: () => worker.close() },
+    { name: "postgres-pool-end", run: () => pool.end() },
+  ],
+});
+installSignalHandlers(shutdown);
 console.log(JSON.stringify({ worker: "started", queue: cfg.queueName ?? QUEUE_NAME }));

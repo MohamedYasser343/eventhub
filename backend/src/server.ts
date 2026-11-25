@@ -19,6 +19,9 @@ import { m, methodLabel, renderMetrics, SpanStatusCode, startRequestSpan, status
 import { runInScope } from "./observability/scope.ts";
 import { context } from "@opentelemetry/api";
 import { createReadyHandler, liveHandler } from "./http/health.ts";
+import { createShutdown, installSignalHandlers, lifecycleLog } from "./lifecycle/shutdown.ts";
+import { forceCloseConnections, httpShutdownSteps } from "./lifecycle/http.ts";
+import { flushSpans } from "./observability/otel.ts";
 import type { Middleware } from "./http/middleware.ts";
 import { createAuthController } from "./modules/auth/controller.ts";
 import { AccountService } from "./modules/auth/service.ts";
@@ -165,7 +168,8 @@ function registerEventRoutes(r: Registrar<AppHandler>, v1: boolean): void {
 export const router = new Router<AppHandler>();
 router.add("GET", "/health", (_req, res) => sendJson(res, 200, { status: "ok" }));
 router.add("GET", "/health/live", liveHandler); // lecture 16: process answers
-router.add("GET", "/health/ready", createReadyHandler(pool)); // lecture 16: PostgreSQL reachable (bounded)
+// Lecture 16: PostgreSQL reachable (bounded). Lecture 19: "draining" (503) once shutdown has started.
+router.add("GET", "/health/ready", createReadyHandler(pool, undefined, () => shutdown?.draining ?? false));
 // Lecture 18: operational metrics are not public (they reveal routes, volume and failure rates).
 // Admin session required; there is deliberately no unauthenticated variant.
 router.add(
@@ -274,6 +278,14 @@ function dispatch(req: IncomingMessage, res: ServerResponse, ctx: RouteContext):
 const pipeline = compose<RouteContext>([observe, cors, errorBoundary], dispatch);
 
 export const server = createServer((req, res) => {
+  // Lecture 19: a request that arrives on an already-open keep-alive connection after draining
+  // started is NOT admitted: 503 + close. (Requests accepted before the signal run to completion.)
+  // /health/ready stays routed so the probe can report "draining" itself.
+  if (shutdown?.draining && !req.url?.startsWith("/health/ready")) {
+    res.writeHead(503, { "Content-Type": "application/json", "Retry-After": "1", Connection: "close" });
+    res.end(JSON.stringify({ error: "Service Unavailable" }));
+    return;
+  }
   const ctx: RouteContext = {
     ...createRequestContext(req, res),
     params: {},
@@ -286,8 +298,26 @@ export const server = createServer((req, res) => {
   pipeline(req, res, ctx).catch(() => res.destroy());
 });
 
+// Lecture 19: only the entry-point process owns signals (tests import `server` and stop it themselves).
+// Dependency order: stop admitting HTTP work and wait for in-flight requests FIRST, only then close what
+// the handlers use (cache, then the PostgreSQL pool), flush telemetry last, then exit.
+let shutdown: ReturnType<typeof createShutdown> | undefined;
 const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 if (isMain) {
+  shutdown = createShutdown({
+    deadlineMs: config.shutdownTimeoutMs,
+    log: lifecycleLog,
+    exit: (code) => process.exit(code),
+    onDeadline: () => forceCloseConnections(server),
+    steps: [
+      ...httpShutdownSteps(server, config.shutdownDrainDelayMs),
+      { name: "cache-close", run: async () => void (await cache.close?.()) },
+      { name: "postgres-pool-end", run: () => pool.end() },
+      { name: "telemetry-flush", run: flushSpans },
+    ],
+  });
+  // Registered before seeding/listening: a signal during startup still gets the full sequence.
+  installSignalHandlers(shutdown);
   if (config.seedDemoUsers) await seedDemo(auth, pool); // same as `npm run seed`
   server.listen(config.port, "127.0.0.1", () => {
     console.log(`EventHub listening on http://127.0.0.1:${config.port}`);

@@ -140,7 +140,12 @@ export interface ServerConfig {
   logRequests: boolean;
   logLevel: LogLevel;
   seedDemoUsers: boolean;
+  /** Lecture 19: whole-sequence hard deadline of the graceful shutdown. Keep it below the supervisor's grace period. */
+  shutdownTimeoutMs: number;
+  /** Lecture 19: how long the listener stays open (readiness already "draining") before it closes. 0 = off. */
+  shutdownDrainDelayMs: number;
 }
+const readShutdownTimeout = (r: Reader): number => r.int("SHUTDOWN_TIMEOUT_MS", 10_000, 1, 600_000);
 export function parseServerConfig(env: Env): ServerConfig {
   const r = new Reader(env);
   const appEnv = r.oneOf("APP_ENV", APP_ENVS, "development");
@@ -151,7 +156,11 @@ export function parseServerConfig(env: Env): ServerConfig {
   const seedDemoUsers = r.flag01("SEED_DEMO_USERS");
   // Cross-field rule: demo users have generated passwords printed to stdout; never in production.
   if (appEnv === "production" && seedDemoUsers) r.problems.push("SEED_DEMO_USERS must be 0 when APP_ENV=production");
-  return r.done({ appEnv, port, corsOrigin, logRequests, logLevel, seedDemoUsers });
+  const shutdownTimeoutMs = readShutdownTimeout(r);
+  const shutdownDrainDelayMs = r.int("SHUTDOWN_DRAIN_DELAY_MS", 0, 0, 600_000);
+  // Cross-field rule: the drain delay is spent INSIDE the deadline, so it must leave room for the real drain.
+  if (shutdownDrainDelayMs >= shutdownTimeoutMs) r.problems.push("SHUTDOWN_DRAIN_DELAY_MS must be smaller than SHUTDOWN_TIMEOUT_MS");
+  return r.done({ appEnv, port, corsOrigin, logRequests, logLevel, seedDemoUsers, shutdownTimeoutMs, shutdownDrainDelayMs });
 }
 
 // ---------- queue producer / worker (lecture 14; its OWN Redis, never the cache's) ----------
@@ -166,6 +175,7 @@ export interface WorkerConfig extends QueueConfig {
   stalledIntervalMs: number | undefined;
   concurrency: number | undefined;
   logLevel: LogLevel;
+  shutdownTimeoutMs: number;
 }
 const readQueue = (r: Reader): QueueConfig => ({
   queueRedisUrl: r.requiredString("QUEUE_REDIS_URL", isRedisUrl, "must be a redis:// or rediss:// URL"),
@@ -186,6 +196,7 @@ export function parseWorkerConfig(env: Env): WorkerConfig {
     stalledIntervalMs: r.optInt("WORKER_STALLED_MS", 1, 3_600_000),
     concurrency: r.optInt("WORKER_CONCURRENCY", 1, 1_000),
     logLevel: r.oneOf("LOG_LEVEL", LOG_LEVELS, "info"),
+    shutdownTimeoutMs: readShutdownTimeout(r),
   };
   return r.done(cfg);
 }
