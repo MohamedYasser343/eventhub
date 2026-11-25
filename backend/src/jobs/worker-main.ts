@@ -1,11 +1,16 @@
 import { loadConfig, parseWorkerConfig } from "../config.ts";
 import { pool } from "../db/pool.ts";
+import { logSettings, logSink } from "../observability/logger.ts";
 import { MockEmailProvider } from "./notification.ts";
 import { QUEUE_NAME, startWorker } from "./queue.ts";
 
 // Separate worker process (npm run jobs:worker). Runs independently of the HTTP server.
 // Lecture 17: every setting is validated before the worker connects or consumes a job.
 const cfg = loadConfig(parseWorkerConfig);
+// Lecture 18: job telemetry goes through the structured logger (stdout, JSON lines).
+logSettings.service = "worker";
+logSettings.level = cfg.logLevel;
+logSink.write = (line) => console.log(line);
 const worker = startWorker({
   url: cfg.queueRedisUrl,
   db: pool,

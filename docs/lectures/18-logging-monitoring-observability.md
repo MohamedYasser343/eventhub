@@ -5,7 +5,7 @@
 - Instructor: Sriniously, Backend from First Principles.
 - Date: 2026-11-25.
 - Learning status: Complete (owner explicitly requested GitHub upload).
-- Implementation status: Not started.
+- Implementation status: Awaiting learner review (implemented 2026-11-25; not yet confirmed by the owner).
 - Source limitations: Video identity and description verified, with third-party transcript excerpts and notes available. The full original recording and official transcript were not independently reviewed during documentation. The EventHub examples, simulations, percentiles, cardinality, alert design and proposed architecture below are supplementary engineering explanations, not a verbatim account of the video. The session described a Go to-do application using New Relic; use that as an illustrative lecture example, not a requirement to adopt that vendor.
 
 ## Learning objectives
@@ -254,11 +254,51 @@ No full paid APM stack, elaborate self-hosted monitoring cluster, microservices 
 - [x] Conceptual notes, discussion and scoped assignment documented.
 - [x] Learning status updated independently in docs/PROGRESS.md in the same commit.
 
-## Implementation evidence (coding agent; pending)
+## Implementation evidence (coding agent)
 
-No implementation, tests, metrics collection or benchmarks were run by the mentor. Record actual changes, commands, outputs, environment, negative cases, regression checks, decisions and links here after implementation.
+Environment: Linux, Node 24 via `tsx`, local Docker PostgreSQL, cache Redis and queue Redis (`npm run db:up`), test database `eventhub_test`. Date: 2026-11-25. Decision: [ADR-017](../decisions/017-opentelemetry-observability.md). Uncommitted at the time of writing; no PR. History: a first hand-written implementation was replaced by OpenTelemetry at the owner's request.
 
-- [ ] Implementation or reproducible experiment.
-- [ ] Acceptance criteria demonstrated.
-- [ ] Negative and regression checks completed.
-- [ ] Implementation progress updated and learner confirmed.
+### What was built
+- `src/observability/otel.ts`: OpenTelemetry setup (AsyncLocalStorage context manager, W3C propagator, `BasicTracerProvider` + `BatchSpanProcessor` behind a bounded guard and a 1 s export timeout, `MeterProvider` with a Prometheus reader and per-instrument cardinality limit 200, `withSpan`, `startRequestSpan`, `renderMetrics`). `logger.ts` (structured JSON, levels, redaction, `traceId` from the active span), `scope.ts` (request id).
+- `src/server.ts`: `observe` middleware starts the SERVER root span and is the only place that records request metrics and the completion log (once, on finish or close); `GET /internal/metrics` (admin only). `src/router.ts` returns the matched route template. `LOG_LEVEL` in `config.ts`.
+- `src/http/error-boundary.ts`: logs through the structured logger (optional `emit` override keeps the lecture 16 tests unchanged). `src/modules/events/repository.ts`: `db.events.findById` child span.
+- `src/jobs/queue.ts`: `telemetryLogger` (default worker logger, `correlationId`, job metrics); `worker-main.ts` writes JSON lines as `service: "worker"`.
+- Tests: `test/observability.test.ts` (20) and one new case in `test/jobs.test.ts`. Demo: `npm run experiment:observability`.
+
+### Commands and actual results
+```
+npm test           -> tests 302, pass 302, fail 0   (last two of three runs; see flake note)
+npm run typecheck  -> clean
+npm run experiment:observability
+```
+Baseline before the lecture was 281/281 (lecture 17). Demo (one run, ids shortened): four requests to `/api/v1/events/:id` gave `http_server_request_duration_count` 2xx=1, 4xx=2, 5xx=1. The slow request (300 ms injected into the pool) had `db.events.findById` 303 ms inside `GET /api/v1/events/:id` 305 ms; the injected-failure request had the db span and the root span both `error`, one `request.dependency_unavailable` log line with the same trace id, and a 503 response. Event 1 is served from the Redis cache on its second read, so the slow/failing runs use an uncached id on purpose.
+
+### Acceptance criteria -> evidence
+| Experiment | Result |
+| --- | --- |
+| Successful request | One `request.completed` record whose `requestId` equals the `X-Request-Id` header, with route template, status, duration; histogram count and active-requests gauge update; root + child span share the log's `traceId`. |
+| 4xx / unauthorized | 401, login rejection and 404 keep their contract, logged at `info`; bearer token, password and cookie values absent from logs, metrics text and span data. |
+| Database failure | Injected `ECONNREFUSED`: existing 503 + `Retry-After`; exactly ONE error log (boundary), no host/password text anywhere; db span and root span `error`; `5xx` bucket counted; active requests back to 0. |
+| Slow dependency | Injected 150 ms: cumulative bucket `le="0.1"` holds 4 of 5 requests while `+Inf` holds 5; the db span is more than 80% of its root span. |
+| Concurrent requests | 25 parallel requests with unique ids: 25 distinct traces, every db span parented to its own request's root. |
+| Cache fallback | Not newly instrumented: cache failures still log `cache.degraded` (warn) without failing the request (existing caching tests pass). No dedicated telemetry test. |
+| Job retry / failure | Real worker test: `correlationId` on every attempt, attempts `[1, 2]` across a retry; synthetic-event test: outcomes counted, levels info/warn/error, ids absent from metrics. Existing retry and duplicate-effect tests pass. |
+| Secret redaction | Nested keys, newline forgery and `Error` reduced to its class name tested; plus the 4xx test above. |
+| Cardinality | 40 event ids + 20 random 404 paths with query strings give 2 series; 1,000 distinct job types fold into at most 201 series with an `otel_metric_overflow="true"` series. |
+| Exporter unavailable | A never-resolving exporter does not slow 20 requests (< 2 s); flooding 1,500 spans keeps pending spans <= 500 and raises `eventhub_telemetry_dropped_total`; a throwing exporter drops and counts the batch and requests keep working; the stuck batch is abandoned by its 1 s timeout. A throwing log sink does not fail a request. |
+| Edge cases | Aborted client: counted once as `aborted`, active requests 0. `traceparent`: valid continues the trace (log carries the id), malformed and all-zero ignored, `traceparent`/`tracestate` not echoed. Unknown method becomes `OTHER`. `/internal/metrics`: 401 anonymous, 403 attendee, 200 admin. |
+| Regression | Full suite against the PostgreSQL test database and both Redis instances. |
+
+### Honest limits and deviations
+- OpenTelemetry SDK only: no Collector, OTLP, Prometheus server, Grafana, alert or retention; "visualization" is the printed demo and the Prometheus text. Required `api` pin 1.9.1 / 2.x SDK generation (ADR-017).
+- Prometheus metric names have no `_seconds` suffix in this exporter version; the lecture 18 table in this note is conceptual and does not fix names.
+- One DB span only; the worker does not continue the HTTP trace.
+- 4xx are logged at `info` (a policy choice for the owner to confirm).
+- **Pre-existing flaky test:** `jobs.test.ts` "provider slower than the processing timeout..." failed in 2 of 6 isolated runs on the commit BEFORE this lecture's changes (and once in one of three full runs after). Its cause (`failedReason` still undefined when asserted) was not investigated or fixed here.
+- Timing assertions (slow dependency, abort) use injected delays of 150 to 400 ms and could be flaky on a very slow machine.
+- Not measured: instrumentation overhead. No performance claim is made.
+
+- [x] Implementation or reproducible experiment.
+- [x] Acceptance criteria demonstrated (see table; cache fallback only by existing tests).
+- [x] Negative and regression checks completed.
+- [ ] Implementation progress confirmed by the learner.

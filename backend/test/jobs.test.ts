@@ -258,3 +258,14 @@ test("queueStats reports backlog and the age of the oldest waiting job", opts, a
   assert.equal(s.waiting, 1);
   assert.ok(s.oldestWaitingAgeMs !== null && s.oldestWaitingAgeMs >= 50);
 });
+
+// Lecture 18: every job event carries the correlation id from the payload, across retries.
+test("job events carry the request's correlation id on every attempt (retry, then success)", opts, async () => {
+  const { queue, events, start } = setup();
+  await enqueueNotification(queue, payload("corr-1", "transient:1"), FAST);
+  start();
+  assert.equal((await until(jobState(queue, "corr-1"))).state, "completed");
+  assert.ok(events.length >= 4);
+  assert.ok(events.every((e) => e.correlationId === "req-1"), JSON.stringify(events));
+  assert.deepEqual(events.filter((e) => e.state === "active").map((e) => e.attempt), [1, 2]);
+});

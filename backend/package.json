@@ -14,6 +14,7 @@
     "jobs:worker": "tsx --env-file-if-exists=.env src/jobs/worker-main.ts",
     "jobs:enqueue": "tsx --env-file-if-exists=.env src/jobs/enqueue-main.ts",
     "experiment:search": "tsx --env-file-if-exists=.env experiments/search-compare.ts",
+    "experiment:observability": "tsx --env-file-if-exists=.env experiments/observability-demo.ts",
     "experiment:cache": "tsx --env-file-if-exists=.env experiments/cache-latency.ts"
   },
   "devDependencies": {
@@ -26,6 +27,13 @@
     "esbuild": false
   },
   "dependencies": {
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/context-async-hooks": "^2.12.1",
+    "@opentelemetry/core": "^2.12.1",
+    "@opentelemetry/exporter-prometheus": "^0.223.2",
+    "@opentelemetry/resources": "^2.12.1",
+    "@opentelemetry/sdk-metrics": "^2.12.1",
+    "@opentelemetry/sdk-trace-base": "^2.12.1",
     "bullmq": "^6.7.8",
     "ioredis": "^6.0.0",
     "jose": "^6.2.18",
