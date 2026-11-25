@@ -8,6 +8,7 @@ process.env["DATABASE_URL"] = url; // the app reads DATABASE_URL; tests point it
 
 // The dev cache must never be touched by tests: REDIS_URL always comes from TEST_REDIS_URL
 // (or is removed, which means "no cache"). Loopback only, since helpers delete keys.
+delete process.env["CACHE_ENABLED"]; // a developer's local flag must not change what the suite tests
 const redisUrl = process.env["TEST_REDIS_URL"];
 if (redisUrl) {
   const host = new URL(redisUrl).hostname;
