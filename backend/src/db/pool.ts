@@ -1,4 +1,5 @@
 import pg from "pg";
+import { loadConfig, parseDatabaseConfig } from "../config.ts";
 
 // BIGINT (OID 20) arrives as a string by default. Ids and counts here stay far
 // below 2^53, so parse them to numbers; a value beyond that would be a design change.
@@ -8,8 +9,8 @@ pg.types.setTypeParser(20, (v) => {
   return n;
 });
 
-const url = process.env.DATABASE_URL;
-if (!url) throw new Error("DATABASE_URL is required (see backend/.env.example)");
+// Lecture 17: validated by the central config module (exits with a key-level message if invalid).
+const { databaseUrl: url } = loadConfig(parseDatabaseConfig);
 
 // One bounded pool for the process. When all connections are busy a caller waits
 // (backpressure) and fails after connectionTimeoutMillis instead of piling up.

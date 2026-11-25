@@ -6,6 +6,7 @@ import type { Query, Registrar } from "./router.ts";
 import { AuthService, ticketsByUser } from "./auth.ts";
 import { pool } from "./db/pool.ts";
 import { cache, cacheTtlSeconds } from "./cache.ts";
+import { loadConfig, parseServerConfig } from "./config.ts";
 import { seedDemo } from "./db/seed.ts";
 import { PgUserRepository } from "./modules/auth/user-repository.ts";
 import { createProtect, ignoredBodyHeaders, sendJson } from "./http/app.ts";
@@ -29,6 +30,9 @@ import { TicketService } from "./modules/tickets/service.ts";
 export type { EventItem, RouteContext };
 
 
+// Lecture 17: validated once, before anything is wired or listening.
+const config = loadConfig(parseServerConfig);
+
 // ---------- composition root ----------
 // The only place where concrete classes are chosen and wired, by hand (no DI
 // container). Dependencies point inward: controller -> service -> repository.
@@ -47,7 +51,7 @@ const authCtl = createAuthController(accountService);
 
 // Exactly one browser origin may read responses (CORS). Anything else gets no
 // CORS headers, so the browser, not the server, blocks it.
-const ALLOWED_ORIGIN = process.env.CORS_ORIGIN ?? "http://localhost:3000";
+const ALLOWED_ORIGIN = config.corsOrigin;
 
 // Allow lists are no longer hard-coded: the router derives them from the routes
 // registered for each path, so they cannot drift from what is really served.
@@ -169,7 +173,7 @@ registerEventRoutes(router.group("/api/v1"), true); // "/api/v2" is not implemen
 // One JSON line per finished request; null disables. Never logs the query string,
 // headers (Authorization), or bodies: only ids, method, path, status, timing.
 export const logSink: { write: ((line: string) => void) | null } = {
-  write: process.env.LOG_REQUESTS === "1" ? (line) => console.log(line) : null,
+  write: config.logRequests ? (line) => console.log(line) : null,
 };
 
 const observe: Middleware<RouteContext> = async (req, res, ctx, next) => {
@@ -241,9 +245,8 @@ export const server = createServer((req, res) => {
 
 const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 if (isMain) {
-  const port = Number(process.env.PORT ?? 8080);
-  if (process.env.SEED_DEMO_USERS === "1") await seedDemo(auth, pool); // same as `npm run seed`
-  server.listen(port, "127.0.0.1", () => {
-    console.log(`EventHub listening on http://127.0.0.1:${port}`);
+  if (config.seedDemoUsers) await seedDemo(auth, pool); // same as `npm run seed`
+  server.listen(config.port, "127.0.0.1", () => {
+    console.log(`EventHub listening on http://127.0.0.1:${config.port}`);
   });
 }

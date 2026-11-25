@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
+import { loadConfig, parseQueueConfig } from "../config.ts";
 import { EnqueueError, createJobQueue, enqueueNotification, queueStats, QUEUE_NAME } from "./queue.ts";
 
 // npm run jobs:enqueue -- [notificationId] [scenario]
 // npm run jobs:enqueue -- --stats
-const url = process.env.QUEUE_REDIS_URL;
-if (!url) throw new Error("QUEUE_REDIS_URL is required (see backend/.env.example)");
-const queue = createJobQueue({ url, name: process.env.QUEUE_NAME ?? QUEUE_NAME, ...(process.env.QUEUE_PREFIX ? { prefix: process.env.QUEUE_PREFIX } : {}) });
+const cfg = loadConfig(parseQueueConfig);
+const queue = createJobQueue({ url: cfg.queueRedisUrl, name: cfg.queueName ?? QUEUE_NAME, ...(cfg.queuePrefix ? { prefix: cfg.queuePrefix } : {}) });
 try {
   if (process.argv[2] === "--stats") {
     console.log(JSON.stringify(await queueStats(queue)));

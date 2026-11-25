@@ -4,7 +4,7 @@
 - Playlist position: 17 (identified during the learning session).
 - Date: 2026-11-25.
 - Learning status: complete (owner explicitly requested GitHub upload).
-- Implementation status: not started.
+- Implementation status: complete (owner confirmed 2026-11-25).
 - Source availability: the learning session used available transcript excerpts and a secondary time-indexed summary; the complete original recording/transcript was not independently reviewed. The following is a synthesis of the session, not a verbatim transcript. EventHub designs, code samples, failure scenarios and experiments are supplementary teaching material, not claims about exact lecture wording or existing implementation.
 
 ## Learning objectives
@@ -288,11 +288,39 @@ No Consul, etcd, Vault, paid secret service, distributed configuration platform,
 - [x] Conceptual notes, discussion and assignment documented.
 - [x] Learning status updated independently in docs/PROGRESS.md.
 
-## Implementation evidence (coding agent; initially pending)
+## Implementation evidence (coding agent)
 
-Preserve teaching material. Record changes, environment, commands, expected vs observed outcomes, negative cases, regressions, decisions and links to evidence. No tests or implementation were run by the learning mentor.
+Environment: Linux, Node v24.22.1, local Docker PostgreSQL/Redis/queue-Redis; branch `main`, uncommitted at the time of writing. Decision: [ADR-016](../decisions/016-central-configuration-boundary.md).
 
-- [ ] Implementation or reproducible experiment.
-- [ ] Acceptance criteria demonstrated.
-- [ ] Negative cases and regression checks as applicable.
-- [ ] Implementation progress updated and learner confirmed.
+**Before (audit):** `process.env` read directly in `db/pool.ts`, `cache.ts`, `server.ts`, `jobs/worker-main.ts`, `jobs/enqueue-main.ts`; `Number(v)` parsing; empty value treated as unset; no JWT settings exist (in-memory sessions).
+
+**Changes:** new `src/config.ts` (pure parsers + `loadConfig`), wired into the five consumers; `CACHE_ENABLED` flag; `.env.example` updated (placeholders only); `test/setup.ts` clears `CACHE_ENABLED`; new `test/config.test.ts` (15 tests; 7 of them spawn real subprocesses with a minimal clean environment).
+
+**Commands and observed results**
+- `npm run typecheck` -> clean. `npm test` -> 281 tests, 281 pass, 0 fail, 0 skipped (0 skipped, so the Redis and queue tests ran; no separate pre-change baseline run was recorded).
+- Manual: `DATABASE_URL=` (empty) -> stderr `DATABASE_URL must be a postgres:// or postgresql:// URL`, exit 1, no listener. `DATABASE_URL=postgres://u:SENTINEL@h:abc/db` -> same message, value not echoed, exit 1. `CACHE_ENABLED=maybe` -> `must be exactly true or false`, exit 1. `QUEUE_REDIS_URL=nope npm run jobs:worker` -> exit 1 before any connection.
+- Two API processes (`PORT=18091 CACHE_ENABLED=false`, `PORT=18092`) from the same code ran side by side with independent settings; both `/health/ready` returned ready.
+
+**Acceptance criteria**
+| Case | Result |
+| --- | --- |
+| Missing DB setting | exit 1, key named, no listener (test) |
+| Signing material | Not applicable: no JWT/signing settings exist yet |
+| PORT abc / 99999 / empty | rejected, exit 1 (unit + subprocess) |
+| Optional port absent | 8080 (unit) |
+| Booleans | exact true/false; `TRUE`, `yes`, `1`, empty, typos rejected (unit) |
+| Env vs file conflict | env wins; file used when env absent (subprocess with `--env-file`) |
+| Cache disabled | no Redis client, broken `REDIS_URL` ignored (unit). Reads then use the existing noCache/PostgreSQL path already covered by the existing suite; no new HTTP-level test for the flag itself |
+| Worker invalid queue setting | exit 1 before connecting (subprocess) |
+| Isolated dev/test | existing suite runs unchanged against `_test` DB |
+| File edited while running | running process keeps its port; restart picks up the edit (subprocess) |
+| Sentinel | not in parse errors nor subprocess output (negative test) |
+| Unreachable but valid DB URL | starts; `/health/ready` 503, `/health/live` 200 (separate from config errors) |
+| Regression | full suite green (above) |
+
+**Limitations / not verified:** per-module validation order (see ADR); real production deployment, secret-manager rotation and multi-replica drift not exercised; the thought experiment on pool capacity (N x P) was not run. The lecture-16 reservation-expiry design question remains unanswered by the learner.
+
+- [x] Implementation or reproducible experiment.
+- [x] Acceptance criteria demonstrated (signing-material row not applicable).
+- [x] Negative cases and regression checks.
+- [x] Learner confirmed (2026-11-25); implementation progress marked complete.

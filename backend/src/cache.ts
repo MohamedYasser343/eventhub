@@ -1,4 +1,5 @@
 import { createClient } from "redis";
+import { loadConfig, parseCacheConfig } from "./config.ts";
 
 // Generic string cache (lecture 13). It is an OPTIMIZATION, never a source of truth:
 // every caller must be able to carry on without it. Implementations may throw (cache
@@ -74,17 +75,14 @@ export class RedisCache implements Cache {
   }
 }
 
-// TTL is validated once at startup: `EX 0` is a Redis error and an unbounded value
-// would make staleness unbounded. Whole seconds, 1..86400.
-export function parseTtlSeconds(raw: string | undefined, fallback = 60): number {
-  if (raw === undefined || raw === "") return fallback;
-  const n = Number(raw);
-  if (!Number.isInteger(n) || n < 1 || n > 86_400) {
-    throw new Error("CACHE_TTL_SECONDS must be a whole number from 1 to 86400");
-  }
-  return n;
+// Kept for the existing unit test; the rules live in config.ts (CACHE_TTL_SECONDS: whole seconds
+// 1..86400, because `EX 0` is a Redis error and an unbounded TTL means unbounded staleness).
+export function parseTtlSeconds(raw: string | undefined): number {
+  return parseCacheConfig({ CACHE_TTL_SECONDS: raw, CACHE_ENABLED: "false" }).ttlSeconds;
 }
 
-// Process-wide backend, like the database pool.
-export const cache: Cache = process.env.REDIS_URL ? new RedisCache(process.env.REDIS_URL) : noCache;
-export const cacheTtlSeconds = parseTtlSeconds(process.env.CACHE_TTL_SECONDS);
+// Process-wide backend, like the database pool. Lecture 17: CACHE_ENABLED=false (or no REDIS_URL)
+// means noCache: reads go to PostgreSQL and no Redis connection is ever opened.
+const cacheConfig = loadConfig(parseCacheConfig);
+export const cache: Cache = cacheConfig.redisUrl ? new RedisCache(cacheConfig.redisUrl) : noCache;
+export const cacheTtlSeconds = cacheConfig.ttlSeconds;
