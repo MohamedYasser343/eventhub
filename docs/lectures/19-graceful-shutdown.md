@@ -6,7 +6,7 @@
 - Duration: 35:56.
 - Date documented: 2026-11-25.
 - Learning status: Complete (owner explicitly requested the lecture documentation upload after the explanation).
-- Implementation status: Not started.
+- Implementation status: Implemented, awaiting learner review (2026-11-25); see the evidence section and ADR-018.
 - Source availability: The exact title, video URL, duration and topic outline were verified against [transcript-derived notes](https://github.com/shubhamscifi/backend_from_first_principles_notes/blob/main/19_graceful_shutdown/NOTES.md). The full auto-generated transcript was also reviewed. The original recording was not independently played during this documentation session. The notes identify several caption corrections: “radius” means Redis, “async Q” means the Asynq job library, and the code shown is a Go backend. Claims about the lecture below are grounded in those materials; additional production guidance and EventHub-specific analysis are explicitly labeled supplementary.
 
 ## Learning objectives
@@ -547,12 +547,46 @@ Do not build a new service or add deployment infrastructure. Inspect the latest 
 - [x] Conceptual notes, source limitations, discussion question and practical assignment documented.
 - [x] Learning status updated independently in docs/PROGRESS.md.
 
-## Implementation evidence (coding agent; pending)
+## Implementation evidence (coding agent)
 
-No EventHub implementation or shutdown experiment was performed as part of this learning documentation.
+Branch `feat/lecture-19-graceful-shutdown`, not committed or pushed at the time of writing. Decision record: [ADR-018](../decisions/018-graceful-shutdown.md). Environment: Node v24.22.1, local PostgreSQL test database and both Redis instances from `backend/docker-compose.yml`.
 
-- [ ] API graceful shutdown implemented and tested.
-- [ ] Worker graceful shutdown reviewed/implemented and tested.
-- [ ] Acceptance criteria demonstrated.
-- [ ] Negative cases and regression checks recorded.
+### What changed
+- `src/lifecycle/shutdown.ts`: one coordinator (idempotent, ordered steps, one hard deadline, best-effort steps, injected `exit`, sanitized lifecycle logs). `src/lifecycle/http.ts`: HTTP steps for the native server.
+- `src/server.ts`: signals installed in the entry-point block only; order `http-close` -> `cache-close` -> `postgres-pool-end` -> `telemetry-flush`; 503 for requests arriving after the signal on open connections.
+- `src/http/health.ts`: `/health/ready` reports `draining`; `/health` untouched. `src/cache.ts`: optional `Cache.close()`, QUIT then destroy.
+- `src/jobs/worker-main.ts`: the old handler replaced by the coordinator (`worker-close` -> `postgres-pool-end`, guard, deadline, exit code).
+- `src/config.ts`: `SHUTDOWN_TIMEOUT_MS` (API and worker), `SHUTDOWN_DRAIN_DELAY_MS` (API). Test-only lab server `test/lab/shutdown-slow-server.ts` (no debug endpoint in the app).
+
+### Commands and results
+| Command | Result |
+| --- | --- |
+| `npm run typecheck` (in `backend/`) | clean |
+| `npx tsx --env-file-if-exists=.env --import ./test/setup.ts --test --test-concurrency=1 test/shutdown.test.ts` | 23/23, three consecutive runs. Two earlier failing runs were test bugs (a probe racing the signal; reused delivery ids that made the job skip its sleep), fixed in the tests, not in the code under test. |
+| `npm test` | 325/325 (302 before + 23 new) |
+
+### Experiments from the assignment
+| # | Experiment | Observed |
+| --- | --- | --- |
+| 1 | Slow HTTP request (isolated server, 1.5 s handler instead of 10 s), SIGTERM at 300 ms | Request got 200 `done` after 1.5 s; process exited 0 after the response. |
+| 2 | New traffic during drain | New connections refused (`ECONNREFUSED`); during `SHUTDOWN_DRAIN_DELAY_MS` readiness answered `503 draining` and other routes `503`, on the isolated server and on the real `src/server.ts` (real `/api/v1/events` returned 503). |
+| 3 | Active queue job (`slow:1500`), SIGTERM while active, a second job waiting | First job completed and its effect recorded once; the second stayed `waiting` (not fetched); steps `worker-close` then `postgres-pool-end`; `job.completed` logged before the pool step. |
+| 4 | SIGKILL during an active job | Existing test in `jobs.test.ts` ("worker dies after the side effect...", exit 137, stalled recovery, one recorded effect) unchanged and passing; not re-implemented. |
+| 5 | Repeated signals | SIGINT then SIGTERM, API-lab and worker: exactly one `shutdown.signal_received`, one `signal_ignored`, one `shutdown.complete`; in-flight request unaffected. Policy: ignore; escalation is the deadline. |
+| 6 | Deadline exceeded | 10 s request, 500 ms deadline: exit 1 well before the request would end, client got `ECONNRESET`, log named `pendingStep: http-close`. Worker (`slow:4000`, 500 ms deadline): exit 1 within the budget, `pendingStep: worker-close`, then an in-process recovery worker completed the job with one recorded effect. |
+| 7 | Cleanup failure | A throwing step: later steps still ran, exit 1, step name logged, error message (with a fake secret host) absent from logs. Done with a synthetic failing step, not with a real Redis outage. |
+| 8 | Regression | Full suite above; `/health`, cache fallback and queue semantics tests pass unchanged. |
+
+Also covered: idle shutdown of the real API exits 0 with all four steps logged and no connection string in the logs; SIGINT equals SIGTERM; signal before `listen()` resolves; idle keep-alive connection does not delay close; config bounds and the drain-delay-below-deadline rule; `LOG_REQUESTS=0` still prints lifecycle lines but no request logs.
+
+### Honest limits
+- No shutdown test with a slow request on the real API process (no slow route exists; the slow request runs against the isolated lab server wired with the same coordinator and HTTP steps).
+- Cache cleanup failure with real Redis down, SIGTERM in the middle of `seedDemo`, upgraded sockets and a supervisor grace period shorter than `SHUTDOWN_TIMEOUT_MS` were not tested.
+- Timing assertions use 150 ms to 1.5 s delays; they could be flaky on a very slow machine. No shutdown-time benchmark; the 10 s default is not measured.
+- The idempotency question in section 9 is still unanswered by the learner; no booking/idempotency-key work was done (out of scope).
+
+- [x] API graceful shutdown implemented and tested.
+- [x] Worker graceful shutdown reviewed/implemented and tested.
+- [x] Acceptance criteria demonstrated (see table; limits above).
+- [x] Negative cases and regression checks recorded.
 - [ ] Implementation progress updated and learner confirmed.
