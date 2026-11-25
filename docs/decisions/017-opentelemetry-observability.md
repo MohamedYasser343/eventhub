@@ -1,6 +1,6 @@
 # ADR-017: OpenTelemetry for traces and metrics, structured JSON logs
 
-Status: Proposed (awaiting owner confirmation)
+Status: Accepted (owner confirmed 2026-11-25)
 Date: 2026-11-25
 Related lecture: [18 — Logging, Monitoring and Observability](../lectures/18-logging-monitoring-observability.md)
 

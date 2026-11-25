@@ -5,7 +5,7 @@
 - Instructor: Sriniously, Backend from First Principles.
 - Date: 2026-11-25.
 - Learning status: Complete (owner explicitly requested GitHub upload).
-- Implementation status: Awaiting learner review (implemented 2026-11-25; not yet confirmed by the owner).
+- Implementation status: Complete (owner confirmed 2026-11-25).
 - Source limitations: Video identity and description verified, with third-party transcript excerpts and notes available. The full original recording and official transcript were not independently reviewed during documentation. The EventHub examples, simulations, percentiles, cardinality, alert design and proposed architecture below are supplementary engineering explanations, not a verbatim account of the video. The session described a Go to-do application using New Relic; use that as an illustrative lecture example, not a requirement to adopt that vendor.
 
 ## Learning objectives
@@ -256,7 +256,7 @@ No full paid APM stack, elaborate self-hosted monitoring cluster, microservices 
 
 ## Implementation evidence (coding agent)
 
-Environment: Linux, Node 24 via `tsx`, local Docker PostgreSQL, cache Redis and queue Redis (`npm run db:up`), test database `eventhub_test`. Date: 2026-11-25. Decision: [ADR-017](../decisions/017-opentelemetry-observability.md). Uncommitted at the time of writing; no PR. History: a first hand-written implementation was replaced by OpenTelemetry at the owner's request.
+Environment: Linux, Node 24 via `tsx`, local Docker PostgreSQL, cache Redis and queue Redis (`npm run db:up`), test database `eventhub_test`. Date: 2026-11-25. Decision: [ADR-017](../decisions/017-opentelemetry-observability.md). PR #16. History: a first hand-written implementation was replaced by OpenTelemetry at the owner's request.
 
 ### What was built
 - `src/observability/otel.ts`: OpenTelemetry setup (AsyncLocalStorage context manager, W3C propagator, `BasicTracerProvider` + `BatchSpanProcessor` behind a bounded guard and a 1 s export timeout, `MeterProvider` with a Prometheus reader and per-instrument cardinality limit 200, `withSpan`, `startRequestSpan`, `renderMetrics`). `logger.ts` (structured JSON, levels, redaction, `traceId` from the active span), `scope.ts` (request id).
@@ -301,4 +301,4 @@ Baseline before the lecture was 281/281 (lecture 17). Demo (one run, ids shorten
 - [x] Implementation or reproducible experiment.
 - [x] Acceptance criteria demonstrated (see table; cache fallback only by existing tests).
 - [x] Negative and regression checks completed.
-- [ ] Implementation progress confirmed by the learner.
+- [x] Implementation progress confirmed by the learner (2026-11-25).
