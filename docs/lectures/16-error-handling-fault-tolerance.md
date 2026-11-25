@@ -295,4 +295,4 @@ No pool `statement_timeout`; no connection-pool exhaustion experiment; no deadlo
 - [x] Implementation and reproducible experiment.
 - [x] Acceptance criteria demonstrated, except the items listed under "Not done".
 - [x] Negative cases and regression checks.
-- [ ] Owner confirmation of implementation completion.
+- [x] Owner confirmed implementation completion (2026-11-25).

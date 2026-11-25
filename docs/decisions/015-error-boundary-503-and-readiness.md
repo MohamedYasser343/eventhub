@@ -1,6 +1,6 @@
 # ADR-015: Dependency-failure mapping (503) and liveness/readiness probes
 
-Status: Accepted (owner approval of the implementation pending)
+Status: Accepted (owner confirmed 2026-11-25)
 Date: 2026-11-25
 Related lecture: [16 — Error handling and fault tolerance](../lectures/16-error-handling-fault-tolerance.md)
 
