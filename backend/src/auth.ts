@@ -41,8 +41,15 @@ export async function verifyPassword(password: string, encoded: string): Promise
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
-// ---------- login rate limiter (fixed window, per username + client address) ----------
-class LoginLimiter {
+// ---------- rate limiter (fixed window) ----------
+// Lecture 20: generalised from the lecture 08 login limiter. Counts events per key in a fixed
+// window. State is in this process's memory: it resets on restart and is NOT shared between
+// instances (a shared atomic store such as Redis is the later, deliberate step).
+// Bounded: when full, expired entries go first; if every entry is still live the OLDEST entry is
+// evicted. It never clears everything, so a flood of junk keys cannot wipe an existing lockout
+// in one step (the lecture 08 version did exactly that). Residual risk, documented in ADR-019:
+// a distributed attacker with enough addresses can still push old entries out.
+export class FixedWindowLimiter {
   private hits = new Map<string, { count: number; resetAt: number }>();
   constructor(
     private now: () => number,
@@ -50,21 +57,33 @@ class LoginLimiter {
     private windowMs = 60_000,
     private maxKeys = 10_000,
   ) {}
-  // Returns seconds to wait, or 0 if the attempt may proceed.
+  get size(): number {
+    return this.hits.size;
+  }
+  // Returns seconds to wait, or 0 if the next event may proceed.
   retryAfter(key: string): number {
     const e = this.hits.get(key);
     if (!e || e.resetAt <= this.now()) return 0;
     return e.count >= this.max ? Math.ceil((e.resetAt - this.now()) / 1000) : 0;
   }
+  // Records one event for `key` (a failed login, an attempted registration...).
   fail(key: string): void {
     const t = this.now();
+    const e = this.hits.get(key);
+    if (e && e.resetAt > t) {
+      e.count++;
+      return;
+    }
+    this.hits.delete(key); // an expired entry is replaced and moves to the newest position
     if (this.hits.size >= this.maxKeys) {
       for (const [k, v] of this.hits) if (v.resetAt <= t) this.hits.delete(k);
-      if (this.hits.size >= this.maxKeys) this.hits.clear(); // bound memory; crude but safe
+      while (this.hits.size >= this.maxKeys) {
+        const oldest = this.hits.keys().next();
+        if (oldest.done) break;
+        this.hits.delete(oldest.value);
+      }
     }
-    const e = this.hits.get(key);
-    if (!e || e.resetAt <= t) this.hits.set(key, { count: 1, resetAt: t + this.windowMs });
-    else e.count++;
+    this.hits.set(key, { count: 1, resetAt: t + this.windowMs });
   }
   clear(key: string): void {
     this.hits.delete(key);
@@ -81,7 +100,13 @@ export class AuthService {
   sessionTtlMs = 15 * 60_000;
   private sessions = new Map<string, { userId: number; expiresAt: number }>(); // key: sha256(token)
   private dummyHash: Promise<string> = hashPassword("dummy-password-for-timing");
-  readonly limiter = new LoginLimiter(() => this.now());
+  // Lecture 20: three independent limits. The per-(address, username) one stops guessing ONE
+  // account; the per-address one stops one address spraying many usernames (each try costs a scrypt
+  // run); the registration one bounds account creation (scrypt + an INSERT per request).
+  readonly limiter = new FixedWindowLimiter(() => this.now()); // failed logins per address|username
+  readonly addressLimiter = new FixedWindowLimiter(() => this.now(), 20, 60_000); // failed logins per address
+  readonly registerLimiter = new FixedWindowLimiter(() => this.now(), 20, 60_000); // registrations per address
+  private lastSweep = 0;
 
   constructor(private readonly users: UserRepository) {}
 
@@ -112,8 +137,21 @@ export class AuthService {
   createSession(userId: number): { token: string; expiresAt: number } {
     const token = randomBytes(32).toString("base64url");
     const expiresAt = this.now() + this.sessionTtlMs;
+    this.sweepExpired();
     this.sessions.set(sha(token), { userId, expiresAt });
     return { token, expiresAt };
+  }
+
+  // Expired sessions are otherwise only removed when their token is presented again, so a valid
+  // account could grow the map without bound. At most once a minute, drop every expired entry.
+  private sweepExpired(): void {
+    const t = this.now();
+    if (t - this.lastSweep < 60_000) return;
+    this.lastSweep = t;
+    for (const [k, v] of this.sessions) if (v.expiresAt <= t) this.sessions.delete(k);
+  }
+  get sessionCount(): number {
+    return this.sessions.size;
   }
 
   // Role is read from the user store on every request (trusted, never from the client).

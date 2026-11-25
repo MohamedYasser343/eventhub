@@ -15,7 +15,8 @@ export interface PublicUser {
 export type RegisterOutcome =
   | { ok: true; user: PublicUser }
   | { ok: false; kind: "invalid"; details: string[] }
-  | { ok: false; kind: "duplicate" };
+  | { ok: false; kind: "duplicate" }
+  | { ok: false; kind: "rate-limited"; retryAfter: number };
 export type LoginOutcome =
   | { ok: true; token: string; expiresAt: number; user: PublicUser }
   | { ok: false; kind: "invalid-credentials" }
@@ -28,13 +29,20 @@ const pub = (u: PublicUser): PublicUser => ({ id: u.id, username: u.username, ro
 export class AccountService {
   constructor(private readonly auth: AuthService) {}
 
-  async register(input: unknown): Promise<RegisterOutcome> {
+  // `clientKey` is the caller's address for rate limiting; trusted in-process callers omit it.
+  async register(input: unknown, clientKey?: string): Promise<RegisterOutcome> {
     const { username, password } = asRecord(input);
     const details: string[] = [];
     if (typeof username !== "string" || !USERNAME.test(username)) details.push("username must be 3-32 letters, digits or _");
     if (typeof password !== "string" || password.length < MIN_PASSWORD || password.length > MAX_PASSWORD)
       details.push(`password must be ${MIN_PASSWORD}-${MAX_PASSWORD} characters`);
     if (details.length > 0) return { ok: false, kind: "invalid", details };
+    // Only attempts that would reach scrypt and the database count; malformed bodies are cheap.
+    if (clientKey !== undefined) {
+      const wait = this.auth.registerLimiter.retryAfter(clientKey);
+      if (wait > 0) return { ok: false, kind: "rate-limited", retryAfter: wait };
+      this.auth.registerLimiter.fail(clientKey);
+    }
     // Any "role" in the input is ignored: public registration always creates an attendee.
     const result = await this.auth.createUser(username as string, password as string, "attendee");
     return result.ok ? { ok: true, user: pub(result.user) } : { ok: false, kind: "duplicate" };
@@ -47,14 +55,15 @@ export class AccountService {
       return { ok: false, kind: "invalid-credentials" };
     }
     const key = `${clientKey}|${username.toLowerCase()}`;
-    const wait = this.auth.limiter.retryAfter(key);
+    const wait = Math.max(this.auth.limiter.retryAfter(key), this.auth.addressLimiter.retryAfter(clientKey));
     if (wait > 0) return { ok: false, kind: "rate-limited", retryAfter: wait };
     const user = await this.auth.verifyCredentials(username, password);
     if (!user) {
       this.auth.limiter.fail(key);
+      this.auth.addressLimiter.fail(clientKey);
       return { ok: false, kind: "invalid-credentials" }; // same outcome for unknown user and wrong password
     }
-    this.auth.limiter.clear(key);
+    this.auth.limiter.clear(key); // NOT the address counter: a valid login must not reset a spray in progress
     const session = this.auth.createSession(user.id);
     return { ok: true, token: session.token, expiresAt: session.expiresAt, user: pub(user) };
   }
