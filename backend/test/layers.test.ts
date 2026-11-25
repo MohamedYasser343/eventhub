@@ -296,7 +296,8 @@ test("an exception downstream becomes one safe 500 with the request id", async (
     );
     assert.equal(result.status, 500);
     const text = await result.text();
-    assert.deepEqual(JSON.parse(text), { error: "Internal Server Error" });
+    // lecture 16: additive `requestId` (same value as the X-Request-Id header)
+    assert.deepEqual(JSON.parse(text), { error: "Internal Server Error", requestId: result.headers.get("x-request-id") });
     assert.equal(text.includes("hunter2"), false);
     assert.ok(result.headers.get("x-request-id"));
     await new Promise((r) => setTimeout(r, 20));

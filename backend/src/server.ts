@@ -12,6 +12,8 @@ import { createProtect, ignoredBodyHeaders, sendJson } from "./http/app.ts";
 import type { AppHandler, RouteContext } from "./http/app.ts";
 import { createRequestContext } from "./http/context.ts";
 import { compose } from "./http/middleware.ts";
+import { createErrorBoundary } from "./http/error-boundary.ts";
+import { createReadyHandler, liveHandler } from "./http/health.ts";
 import type { Middleware } from "./http/middleware.ts";
 import { createAuthController } from "./modules/auth/controller.ts";
 import { AccountService } from "./modules/auth/service.ts";
@@ -150,6 +152,8 @@ function registerEventRoutes(r: Registrar<AppHandler>, v1: boolean): void {
 
 export const router = new Router<AppHandler>();
 router.add("GET", "/health", (_req, res) => sendJson(res, 200, { status: "ok" }));
+router.add("GET", "/health/live", liveHandler); // lecture 16: process answers
+router.add("GET", "/health/ready", createReadyHandler(pool)); // lecture 16: PostgreSQL reachable (bounded)
 registerEventRoutes(router, false); // legacy, unversioned (kept for lecture 05 clients)
 registerEventRoutes(router.group("/api/v1"), true); // "/api/v2" is not implemented: 404
 
@@ -190,19 +194,8 @@ const cors: Middleware<RouteContext> = async (req, res, _ctx, next) => {
   await next();
 };
 
-// Wraps everything downstream: a throw or rejection becomes one safe 500 (no stack,
-// no message), or just ends the response if headers were already sent.
-const errorBoundary: Middleware<RouteContext> = async (_req, res, ctx, next) => {
-  try {
-    await next();
-  } catch (err) {
-    logSink.write?.(
-      JSON.stringify({ requestId: ctx.requestId, level: "error", error: err instanceof Error ? err.name : "unknown" }),
-    );
-    if (!res.headersSent) sendJson(res, 500, { error: "Internal Server Error" });
-    else if (!res.writableEnded) res.end();
-  }
-};
+// Lecture 16: see http/error-boundary.ts (500 for bugs, 503 when PostgreSQL is unreachable).
+const errorBoundary = createErrorBoundary((record) => logSink.write?.(JSON.stringify(record)));
 
 function dispatch(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> | void {
   // Origin-form targets start with "/". Parse them against a fixed host so a
