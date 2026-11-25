@@ -250,7 +250,7 @@ test("data written before an app restart is readable after it (users included; s
   }
 });
 
-test("database outage becomes a safe 500 without driver details", async () => {
+test("database outage becomes a safe 503 (lecture 16; was 500) without driver details", async () => {
   const real = pool.query.bind(pool) as (...a: unknown[]) => unknown;
   (pool as unknown as { query: unknown }).query = (...a: unknown[]) => {
     if (typeof a[0] === "string" && a[0].includes("FROM events")) return Promise.reject(Object.assign(new Error("connect ECONNREFUSED 10.0.0.5:5432 password=hunter2"), { code: "ECONNREFUSED" }));
@@ -258,9 +258,10 @@ test("database outage becomes a safe 500 without driver details", async () => {
   };
   try {
     const r = await fetch(v1("/events/1"));
-    assert.equal(r.status, 500);
+    assert.equal(r.status, 503);
+    assert.equal(r.headers.get("retry-after"), "5");
     const text = await r.text();
-    assert.deepEqual(JSON.parse(text), { error: "Internal Server Error" });
+    assert.deepEqual(JSON.parse(text), { error: "Service Unavailable", requestId: r.headers.get("x-request-id") });
     assert.equal(/hunter2|ECONNREFUSED/.test(text), false);
   } finally {
     (pool as unknown as { query: unknown }).query = real;

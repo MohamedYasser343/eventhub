@@ -248,11 +248,51 @@ No real payments or emails, frontend, new microservices, Kubernetes, speculative
 - [x] Conceptual notes, discussion and assignment documented.
 - [x] Learning status updated independently in docs/PROGRESS.md in the same commit.
 
-## Implementation evidence (coding agent; pending)
+## Implementation evidence (coding agent)
 
-- [ ] Implementation or reproducible experiment.
-- [ ] Acceptance criteria demonstrated.
-- [ ] Negative cases and regression checks as applicable.
-- [ ] Implementation progress updated and learner confirmed.
+Branch `feat/lecture-16-error-handling`, ADR-015. Environment: Linux, Node v24, PostgreSQL 17 / Redis 7 containers from `backend/docker-compose.yml`, local machine with other containers running. All numbers below are from this machine, single runs.
 
-No implementation or tests were performed as part of this documentation task.
+### Audit of the existing code (no rewrite where it already worked)
+
+| Assignment item | State before this lesson | Action |
+| --- | --- | --- |
+| Central async error boundary, no leaks, headers-already-sent | Existed (`errorBoundary` in server.ts) | Moved to `src/http/error-boundary.ts` so it can be tested in isolation; body now also carries `requestId` |
+| Invalid input / unknown event | 400/422 and 404 already documented and tested | Unchanged (regression-tested) |
+| Duplicate resource, concurrent | Username: unique index on `lower(username)`, `23505` caught in `PgUserRepository` | New test: two concurrent registers (`race_user`/`RACE_USER`) give exactly one 201 and one 409. Events have no unique name, so no event conflict case exists |
+| Login failures | One generic 401, dummy scrypt for unknown users, 429 + Retry-After | Unchanged |
+| DB unavailable | Any pg error -> 500 | **Changed**: 503 + `Retry-After: 5`, generic body |
+| Mock dependency: timeout / transient / permanent / lost reply, idempotency | Lecture 14 lab (`MockEmailProvider`, BullMQ backoff, `UnrecoverableError`, dedup by key) | Reused, not duplicated; no synchronous external call exists in the HTTP path |
+| Liveness vs readiness | Only `/health` | **Added** `/health/live`, `/health/ready`; `/health` unchanged |
+| Optional cache failure | Cache-aside falls back to PostgreSQL (lecture 13) | Re-verified |
+
+### Tests
+- `npm test`: 266 tests (256 before + 10 new in `test/error-handling.test.ts`). `npm run typecheck` clean.
+- Two earlier tests were changed on purpose: `layers.test.ts` (500 body now has `requestId`) and `postgres.test.ts` (database outage now 503, was 500).
+- **Flaky test, not caused by this lesson:** `jobs.test.ts` "provider slower than the processing timeout..." failed in 2 of 6 full runs (assertion on `failedReason` being undefined); the other runs were green. It is a lecture-14 race and was not investigated here.
+
+### Negative cases covered by the new tests
+Constraint/syntax/programmer errors are not classified as unavailable; unexpected error -> generic 500 (no SQL, password, path in body or log); unreachable database -> 503 without host/port; error after headers sent ends the stream with no second response; refused connection and hung database both give "not ready" within the bound (hung probe measured 100–600 ms window with a 120 ms limit); the real pg-pool connect timeout is recognised; concurrent duplicate registration.
+
+### Live experiment (reproducible)
+`PORT=48731 npm start`, then `docker stop eventhub-pg`, curl, `docker start eventhub-pg`, curl (application not restarted):
+
+| Endpoint | DB up | DB stopped | After `docker start` |
+| --- | --- | --- | --- |
+| `/health` | 200 | 200 | — |
+| `/health/live` | 200 | 200 | — |
+| `/health/ready` | 200 (18 ms) | **503** (4 ms) | 200 |
+| `/api/v1/events` | 200 | **503**, body `{"error":"Service Unavailable","requestId":...}` | 200 |
+| `/api/v1/events/1` | 200 | 200 (served from the Redis cache) | 200 |
+
+The process stayed alive and the pool recovered without a restart. Log line for the failure contains only `kind: "db-unavailable"` and the error class.
+
+### Answer to the posed check (last ticket booked, email provider 503)
+Keep the booking; record the notification as failed/pending; retry it later through the lecture-14 queue with the same idempotency key. (No real booking flow exists yet, so this is shown only by the lab.)
+
+### Not done / limitations
+No pool `statement_timeout`; no connection-pool exhaustion experiment; no deadlock (`40P01`) retry; no HTTP-path external call to wrap with timeout/retry (the lecture-14 lab covers retries/lost replies); readiness does not check Redis by design; the message-text match for pg-pool's connect timeout is version-sensitive; the lecture's nested error envelope and RFC 9457 were not adopted.
+
+- [x] Implementation and reproducible experiment.
+- [x] Acceptance criteria demonstrated, except the items listed under "Not done".
+- [x] Negative cases and regression checks.
+- [x] Owner confirmed implementation completion (2026-11-25).
