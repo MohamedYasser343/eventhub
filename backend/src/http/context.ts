@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isIP } from "node:net";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Role } from "../auth.ts";
 
@@ -32,3 +33,22 @@ export function createRequestContext(req: IncomingMessage, res: ServerResponse, 
   });
   return { requestId: requestIdFor(req), startedAt: now(), signal: ac.signal };
 }
+
+// Lecture 22: the address used for per-client rate limits. Behind a reverse proxy every connection's socket
+// peer is the PROXY, so keying on it alone would put all clients in one bucket (one attacker could lock
+// everyone out). X-Forwarded-For is believed ONLY when the socket peer is a configured trusted proxy;
+// from any other peer the header is client-controlled and ignored. The header is read from the right
+// (the entry a trusted proxy appended), skipping trusted proxy hops; a malformed entry falls back to the peer.
+export function clientAddress(req: IncomingMessage, trusted: ReadonlySet<string>): string {
+  const peer = normalizeIp(req.socket.remoteAddress ?? "?");
+  if (trusted.size === 0 || !trusted.has(peer)) return peer;
+  const xff = req.headers["x-forwarded-for"];
+  const raw = (Array.isArray(xff) ? xff.join(",") : (xff ?? "")).split(",").map((p) => normalizeIp(p.trim())).filter((p) => p !== "");
+  for (let i = raw.length - 1; i >= 0; i--) {
+    const hop = raw[i]!;
+    if (isIP(hop) === 0) return peer; // garbage: do not guess
+    if (!trusted.has(hop)) return hop;
+  }
+  return peer;
+}
+const normalizeIp = (ip: string): string => (ip.startsWith("::ffff:") && isIP(ip.slice(7)) === 4 ? ip.slice(7) : ip);

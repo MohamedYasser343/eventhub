@@ -4,7 +4,7 @@
 - Playlist position: 22 (course numbering 21.2, following 21.1).
 - Date: 2026-11-26.
 - Learning status: complete by the owner's explicit GitHub upload request.
-- Implementation status: not started.
+- Implementation status: Awaiting learner review (evidence appended below; owner confirmation pending).
 - Source limitations: video title and chapter outline reverified against the public YouTube description and secondary playlist indexes. The learning session reported partial third-party transcript access; the full original transcript and recording were not independently reviewed during documentation. The explanations and EventHub examples below are teaching synthesis, not verbatim lecture content.
 
 ## Learning objectives
@@ -179,11 +179,65 @@ flowchart TD
 - [x] Conceptual notes, discussion and assignment documented.
 - [x] Learning status updated independently in docs/PROGRESS.md.
 
-## Implementation evidence (coding agent; pending)
+## Implementation evidence (coding agent)
 
-No implementation, tests, load experiments or benchmark measurements were performed as part of this documentation.
+Branch `feat/lecture-22-horizontal-scaling` (built on the lecture 21 branch: it reuses the benchmark tool and bench database); decision record [ADR-021](../decisions/021-shared-sessions-and-trusted-proxy.md). All numbers were measured in this session on a shared developer machine (12 CPUs, load average up to ~26 during the load runs), so absolute values are noisy; repeats are listed.
 
-- [ ] Implementation or reproducible experiment.
-- [ ] Acceptance criteria demonstrated.
-- [ ] Negative cases and regression checks as applicable.
-- [ ] Implementation progress updated and learner confirmed.
+### Inspection: what is process-local (before any change)
+| State | Where | Replica-safe? |
+| --- | --- | --- |
+| Sessions (opaque tokens) | `Map` in `AuthService` | **No** - demonstrated: login on :8081 -> `/auth/me` 200 on :8081, **401 on :8082** |
+| Login/register rate limiters | `Map` in `FixedWindowLimiter` | No (N x limit), stays local (deferred, documented) |
+| Rate-limit key | `req.socket.remoteAddress` | **No** behind a proxy (all clients = the proxy) |
+| Tickets (`ticketsByUser`) | synthetic in-memory Map | No, diverges per replica; booking is out of scope, left as is |
+| Users, events | PostgreSQL | Yes |
+| Public-event cache | shared Redis, TTL | Yes (stale up to TTL, unchanged contract) |
+| Job queue / worker | separate Redis + one worker | Yes; replicas only enqueue, the worker is not duplicated |
+| Migrations | advisory lock (`pg_advisory_lock`) | Yes; replicas never migrate, seed is off (`SEED_DEMO_USERS=0`), the concurrent-runner test exists |
+| Pool | 10 connections per process | budget = replicas x `DB_POOL_MAX` (now configurable) |
+| Logs / metrics counters | per process | local by nature |
+
+### Changes
+- `migrations/005_sessions.sql` + `PgSessionStore` behind a `SessionStore` interface (hash-only keys, same TTL, logout = DELETE). `createSession`/`destroySession` became async.
+- `TRUSTED_PROXIES` + `clientAddress()` for rate-limit keys (header believed only from listed proxy IPs); `DB_POOL_MAX`.
+- `scale/`: `nginx.conf.template` (round robin or `least_conn`), `docker-compose.yml` (proxy only), `lb.sh`, `replicas.sh`, `verify.sh`, `drill.sh`.
+- **Deviation from the proposed topology (reasoned):** the three API replicas are plain `node` processes, not containers. No Node image is available locally and pulling one is a download I did not take without approval; plain processes also receive SIGTERM directly (no wrapper as PID 1), which the shutdown experiment needs. The proxy (`nginx:alpine`, already local) runs in a container on the host network, reaching `127.0.0.1:8081-8083`. Existing PostgreSQL/Redis containers are reused; only the proxy port 8080 is exposed (loopback). Containerised replicas remain a follow-up.
+
+### Functional results (`scale/verify.sh`, dev database, round robin)
+- 30 requests through the proxy: 10 / 11 / 9 answered by :8081 / :8082 / :8083 (identified by the test-only `X-Upstream` header the proxy adds).
+- Token minted on replica 1: `/auth/me` x9 through the proxy -> 200 on all three replicas (3 each). Bad token -> 401.
+- Event created on :8081 (201, id 3) read on :8082 -> same body; owner PATCH on :8083 -> 200; **wrong-owner PATCH -> 403**; unauthenticated PATCH -> 401.
+- Replica 1 killed with SIGKILL and restarted: the same token still 200, the event still readable (state is in PostgreSQL).
+- Logout on :8083 -> 204; the same token on :8081 -> 401 (revocation is immediate everywhere).
+
+### Failure drills (GET workload ~20 req/s through the proxy; `scale/drill.sh`)
+- **SIGKILL of one replica** (t=3 s, restarted at t=9 s): 280 of 280 responses 200; zero client-visible failures. NGINX retried the failed connect on the next replica (the response's upstream list shows two addresses for those requests), then skipped the dead one (`max_fails=2 fail_timeout=5s`). Time to exclusion cannot be read as "failures" here because retries hid them; the exposure window is bounded by the 1 s connect timeout and at most 2 tries.
+- **Non-idempotent POST while replica 2 was dead** (12 bad-credential logins): all answered by the live replicas (401, then 429 from the limiter); the log shows `connect() failed (Connection refused)` on :8082 followed by a retry. This is safe because nothing had been sent to the dead replica; NGINX still does not retry a POST once it has been sent.
+- **All replicas down**: 502 in 0.4-10 ms, no hang; after restart the proxy answered 200 again.
+- **SIGTERM with drain delay 1.5 s** (`SHUTDOWN_DRAIN_DELAY_MS=1500`): first attempt with `proxy_next_upstream error timeout` showed **4 client-visible 503s in 40 requests**: the draining replica answers 503 and the open-source proxy has no active readiness probe. After adding `http_503` to `proxy_next_upstream` (safe: the draining replica admits nothing before answering 503), the same drill gave **0 failures in 50 requests**, and **20 slow in-flight requests started on the replica before SIGTERM all completed with 200** (0.28-1.04 s). One run each; no repeat. Unknown: behaviour for a POST that reaches a draining replica (the client gets 503 + `Retry-After: 1` and must retry; NGINX will not replay a sent POST).
+- Not performed: multiple SIGTERM signals, dependency (PostgreSQL/Redis) outage with replicas up, pool-exhaustion under 3 replicas.
+
+### Load comparison (bench DB, 300,000 rows, `mixed` = 90% cached event detail + 10% heavy list, 30 virtual users, 12 s measured after 3 s warm-up, closed loop, cache on, pool 10 per replica)
+| Setup | Run 1: ok-req/s, p50 / p95 / p99 ms | Run 2 |
+| --- | --- | --- |
+| 1 replica, direct | 1467; 1.9 / 179 / 209 | 1110; 2.6 / 246 / 289 |
+| 3 replicas, round robin | 1627; 4.2 / 145 / 288 | 1474; 4.3 / 176 / 316 |
+| 3 replicas, `least_conn` | **2323**; 5.8 / **22** / 198 | **2319**; 5.8 / **22** / 204 |
+Zero 429/5xx/timeouts in every run except 3 requests (of 27,832) with 4xx in the second `least_conn` run, **cause not investigated**. PostgreSQL connections open during the run: 11 (1 replica) vs 21 (3 replicas), pool ceiling 30 + worker/admin. The PostgreSQL container used ~650-810% CPU in every setup, i.e. **the database, not the API tier, is the limiting resource**: three replicas did not triple throughput (round robin +10-33%), and `least_conn` helped mainly because the heavy 10% of requests stopped queuing behind each other on one replica. The proxy adds one hop (p50 rises from ~2 to ~4-6 ms). Limitations: single host and one shared CPU pool for generator, proxy, replicas and database; two repeats; the generator used 29-53% of one core; Node CPU per replica was not captured (my `ps` filter returned nothing).
+
+### Security review
+- Spoofing: through the proxy, 20 failed logins with a different fake `X-Forwarded-For` each were still limited (**401 x15, then 429**): NGINX overwrites the header and the API only trusts it from `TRUSTED_PROXIES`. Gap shown honestly: connecting **directly** to a replica from the trusted loopback address with fake headers was **never limited (20 x 401)**; without the header, direct attempts are limited after 5. Replicas must therefore be reachable only from the proxy in any real deployment.
+- Rate limits are per replica: **15 = 3 x 5 failures before the first 429** through the proxy (measured), and 10 with only two live replicas. A shared atomic limiter (e.g. Redis) is the deliberate later step (ADR-019).
+- Sessions: only the sha256 of the token is stored; deleting a user cascades to their sessions; the extra DB query per authenticated request was **not benchmarked in isolation**.
+- No secrets committed (`.env` ignored; the lab uses synthetic users and the existing local credentials).
+
+### Tests and checks
+`npm test`: **348 tests, 348 passed**, `npm run typecheck` clean. New `test/scaling.test.ts` covers: login on one replica authenticated on another, logout revoking everywhere, the in-memory per-process baseline still showing the problem, expiry across replicas, hash-only storage, cascade, `clientAddress` (direct client cannot spoof, no proxies configured, rightmost-untrusted hop, garbage fallback, IPv4-mapped peer) and config validation. Updated tests: sessions now survive a restart (`postgres.test.ts`), sweep test counts rows in `sessions`, migration list now 5 files.
+
+### Open items
+Rate-limit sharing; replica-local tickets (resolved only when booking is built); containerised replicas; optional active health checks (NGINX Plus or another proxy) and readiness-aware routing; per-request session lookup cost; no read replicas/sharding/CDN (deferred by the assignment); lecture 23 concurrency (last-ticket race) is not addressed here: sharing PostgreSQL does **not** prevent overselling.
+
+- [x] Implementation or reproducible experiment.
+- [x] Acceptance criteria demonstrated, with the gaps listed above.
+- [x] Negative cases and regression checks as applicable.
+- [ ] Implementation progress updated and learner confirmed. (owner confirmation pending)

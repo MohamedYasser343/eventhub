@@ -9,9 +9,10 @@ import { cache, cacheTtlSeconds } from "./cache.ts";
 import { loadConfig, parseServerConfig } from "./config.ts";
 import { seedDemo } from "./db/seed.ts";
 import { PgUserRepository } from "./modules/auth/user-repository.ts";
+import { PgSessionStore } from "./modules/auth/session-store.ts";
 import { createProtect, forbidden, ignoredBodyHeaders, sendJson } from "./http/app.ts";
 import type { AppHandler, RouteContext } from "./http/app.ts";
-import { createRequestContext } from "./http/context.ts";
+import { clientAddress, createRequestContext } from "./http/context.ts";
 import { compose } from "./http/middleware.ts";
 import { createErrorBoundary } from "./http/error-boundary.ts";
 import { log, logSettings, logSink } from "./observability/logger.ts";
@@ -47,7 +48,7 @@ if (config.logRequests) logSink.write = (line) => console.log(line);
 // ---------- composition root ----------
 // The only place where concrete classes are chosen and wired, by hand (no DI
 // container). Dependencies point inward: controller -> service -> repository.
-export const auth = new AuthService(new PgUserRepository(pool));
+export const auth = new AuthService(new PgUserRepository(pool), new PgSessionStore(pool)); // lecture 22: shared sessions
 // Cache failures are logged as ids + operation only (never keys' values or the URL).
 export const publicEventCache = new PublicEventCache(cache, cacheTtlSeconds, (what, id) =>
   log("warn", "cache.degraded", { cache: what, eventId: id }),
@@ -58,7 +59,8 @@ const accountService = new AccountService(auth);
 const protect = createProtect(auth);
 const eventsCtl = createEventsController(eventService);
 const ticketsCtl = createTicketsController(ticketService);
-const authCtl = createAuthController(accountService);
+const trustedProxies: ReadonlySet<string> = new Set(config.trustedProxies);
+const authCtl = createAuthController(accountService, (req) => clientAddress(req, trustedProxies));
 
 // Exactly one browser origin may read responses (CORS). Anything else gets no
 // CORS headers, so the browser, not the server, blocks it.

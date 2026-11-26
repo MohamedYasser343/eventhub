@@ -1,0 +1,38 @@
+# Lecture 22: local reverse proxy in front of N API replicas on the SAME host (process-level distribution,
+# not host-level availability). Rendered by scale/lb.sh; __ALGO__ is "" (round robin) or "least_conn;".
+worker_processes 2;
+events { worker_connections 2048; }
+http {
+  log_format lb '$time_iso8601 $request_method $uri $status upstream=$upstream_addr tries=$upstream_status rt=$request_time urt=$upstream_response_time';
+  access_log /dev/stdout lb;
+  upstream api {
+    __ALGO__
+    # PASSIVE health only (NGINX Open Source): after max_fails failed attempts within fail_timeout the server is skipped
+    # for fail_timeout. It cannot read /health/ready, so a replica that is draining (503) is still used until it closes.
+    server 127.0.0.1:8081 max_fails=2 fail_timeout=5s;
+    server 127.0.0.1:8082 max_fails=2 fail_timeout=5s;
+    server 127.0.0.1:8083 max_fails=2 fail_timeout=5s;
+    keepalive 32;
+  }
+  server {
+    listen 127.0.0.1:8080;
+    # Test-only instance identity (no app code): which replica answered. Remove for anything but a local lab.
+    add_header X-Upstream $upstream_addr always;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $host;
+    # OVERWRITE, never append: a client-sent X-Forwarded-For is discarded here. The API additionally trusts the header
+    # only from TRUSTED_PROXIES.
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_connect_timeout 1s;      # bounded: no waiting forever on a dead replica
+    proxy_read_timeout 15s;
+    proxy_send_timeout 15s;
+    # Retry on the NEXT replica for connect errors, timeouts and a 503 (a draining replica answers 503 before it processes
+    # anything; see the lecture 22 evidence), at most 2 attempts in total. NGINX does not retry
+    # non-idempotent methods (POST/PATCH...) by default, which is what we want: no duplicated writes.
+    proxy_next_upstream error timeout http_503;
+    proxy_next_upstream_tries 2;
+    proxy_next_upstream_timeout 3s;
+    location / { proxy_pass http://api; }
+  }
+}

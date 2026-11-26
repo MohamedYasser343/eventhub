@@ -3,12 +3,12 @@ import { NO_STORE, readJson, sendJson } from "../../http/app.ts";
 import type { Authed } from "../../http/app.ts";
 import type { AccountService } from "./service.ts";
 
-export function createAuthController(accounts: AccountService) {
+export function createAuthController(accounts: AccountService, addressOf: (req: IncomingMessage) => string = (req) => req.socket.remoteAddress ?? "?") {
   return {
     async register(req: IncomingMessage, res: ServerResponse): Promise<void> {
       const body = await readJson(req, res);
       if (!body) return;
-      const r = await accounts.register(body.value, req.socket.remoteAddress ?? "?");
+      const r = await accounts.register(body.value, addressOf(req));
       if (r.ok) return sendJson(res, 201, r.user, NO_STORE);
       if (r.kind === "rate-limited") {
         return sendJson(res, 429, { error: "Too Many Requests" }, { ...NO_STORE, "Retry-After": String(r.retryAfter) });
@@ -20,7 +20,7 @@ export function createAuthController(accounts: AccountService) {
     async login(req: IncomingMessage, res: ServerResponse): Promise<void> {
       const body = await readJson(req, res);
       if (!body) return;
-      const r = await accounts.login(body.value, req.socket.remoteAddress ?? "?");
+      const r = await accounts.login(body.value, addressOf(req));
       if (r.ok) {
         return sendJson(res, 200, {
           token: r.token,
@@ -35,8 +35,8 @@ export function createAuthController(accounts: AccountService) {
       sendJson(res, 401, { error: "Invalid credentials" }, NO_STORE);
     },
 
-    logout(_req: IncomingMessage, res: ServerResponse, ctx: Authed): void {
-      accounts.logout(ctx.token);
+    async logout(_req: IncomingMessage, res: ServerResponse, ctx: Authed): Promise<void> {
+      await accounts.logout(ctx.token);
       res.writeHead(204, NO_STORE);
       res.end();
     },

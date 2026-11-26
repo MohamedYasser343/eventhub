@@ -95,10 +95,43 @@ export type Registration =
   | { ok: true; user: User }
   | { ok: false; reason: "duplicate" };
 
+// ---------- session storage (lecture 22) ----------
+// Sessions used to live in one process's memory, which breaks as soon as a second API instance exists
+// (login on A, 401 on B). The store is now an interface: PostgreSQL in the server (shared by every replica),
+// memory for unit tests. Only the sha256 of the token is ever stored, in either implementation.
+export interface SessionRecord {
+  userId: number;
+  expiresAt: number; // epoch ms
+}
+export interface SessionStore {
+  put(tokenHash: string, rec: SessionRecord): Promise<void>;
+  get(tokenHash: string): Promise<SessionRecord | undefined>;
+  delete(tokenHash: string): Promise<void>;
+  deleteExpired(now: number): Promise<void>;
+  readonly size?: number; // in-memory store only (tests)
+}
+export class InMemorySessionStore implements SessionStore {
+  private sessions = new Map<string, SessionRecord>();
+  get size(): number {
+    return this.sessions.size;
+  }
+  async put(h: string, rec: SessionRecord): Promise<void> {
+    this.sessions.set(h, rec);
+  }
+  async get(h: string): Promise<SessionRecord | undefined> {
+    return this.sessions.get(h);
+  }
+  async delete(h: string): Promise<void> {
+    this.sessions.delete(h);
+  }
+  async deleteExpired(now: number): Promise<void> {
+    for (const [k, v] of this.sessions) if (v.expiresAt <= now) this.sessions.delete(k);
+  }
+}
+
 export class AuthService {
   now: () => number = Date.now; // injectable clock for expiry tests
   sessionTtlMs = 15 * 60_000;
-  private sessions = new Map<string, { userId: number; expiresAt: number }>(); // key: sha256(token)
   private dummyHash: Promise<string> = hashPassword("dummy-password-for-timing");
   // Lecture 20: three independent limits. The per-(address, username) one stops guessing ONE
   // account; the per-address one stops one address spraying many usernames (each try costs a scrypt
@@ -108,7 +141,10 @@ export class AuthService {
   readonly registerLimiter = new FixedWindowLimiter(() => this.now(), 20, 60_000); // registrations per address
   private lastSweep = 0;
 
-  constructor(private readonly users: UserRepository) {}
+  constructor(
+    private readonly users: UserRepository,
+    private readonly sessions: SessionStore = new InMemorySessionStore(),
+  ) {}
 
   // Trusted path (startup seed, tests). There is deliberately no HTTP route to set a role.
   // The database's unique index decides duplicates, so concurrent registrations are safe.
@@ -133,41 +169,42 @@ export class AuthService {
   }
 
   // New random id on every login (no session fixation: clients never choose it).
-  // Only a hash of the token is stored, so a memory dump does not yield usable tokens.
-  createSession(userId: number): { token: string; expiresAt: number } {
+  // Only a hash of the token is stored, so a database or memory dump does not yield usable tokens.
+  async createSession(userId: number): Promise<{ token: string; expiresAt: number }> {
     const token = randomBytes(32).toString("base64url");
     const expiresAt = this.now() + this.sessionTtlMs;
     this.sweepExpired();
-    this.sessions.set(sha(token), { userId, expiresAt });
+    await this.sessions.put(sha(token), { userId, expiresAt });
     return { token, expiresAt };
   }
 
   // Expired sessions are otherwise only removed when their token is presented again, so a valid
-  // account could grow the map without bound. At most once a minute, drop every expired entry.
+  // account could grow the store without bound. At most once a minute, drop every expired entry
+  // (best effort in the background: a failed sweep only delays cleanup, it never blocks a login).
   private sweepExpired(): void {
     const t = this.now();
     if (t - this.lastSweep < 60_000) return;
     this.lastSweep = t;
-    for (const [k, v] of this.sessions) if (v.expiresAt <= t) this.sessions.delete(k);
+    void this.sessions.deleteExpired(t).catch(() => {});
   }
   get sessionCount(): number {
-    return this.sessions.size;
+    return this.sessions.size ?? Number.NaN;
   }
 
   // Role is read from the user store on every request (trusted, never from the client).
   async authenticate(token: string): Promise<User | null> {
     const key = sha(token);
-    const s = this.sessions.get(key);
+    const s = await this.sessions.get(key);
     if (!s) return null;
     if (s.expiresAt <= this.now()) {
-      this.sessions.delete(key);
+      await this.sessions.delete(key);
       return null;
     }
     return (await this.users.findById(s.userId)) ?? null;
   }
 
-  destroySession(token: string): void {
-    this.sessions.delete(sha(token));
+  destroySession(token: string): Promise<void> {
+    return this.sessions.delete(sha(token));
   }
 }
 

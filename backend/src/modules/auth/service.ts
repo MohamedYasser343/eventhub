@@ -64,11 +64,11 @@ export class AccountService {
       return { ok: false, kind: "invalid-credentials" }; // same outcome for unknown user and wrong password
     }
     this.auth.limiter.clear(key); // NOT the address counter: a valid login must not reset a spray in progress
-    const session = this.auth.createSession(user.id);
+    const session = await this.auth.createSession(user.id);
     return { ok: true, token: session.token, expiresAt: session.expiresAt, user: pub(user) };
   }
 
-  logout(token: string): void {
-    this.auth.destroySession(token); // server-side revocation: the old token is dead immediately
+  async logout(token: string): Promise<void> {
+    await this.auth.destroySession(token); // server-side revocation: the old token is dead immediately
   }
 }
