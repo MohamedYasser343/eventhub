@@ -104,14 +104,14 @@ test("migrations rebuild the schema in an empty database and re-running applies 
   url.pathname = `/${name}`;
   const fresh = new pg.Pool({ connectionString: url.toString(), max: 2 });
   try {
-    assert.deepEqual(await migrate(fresh), ["001_users_events.sql", "002_notification_lab.sql", "003_event_name_fts.sql"]);
+    assert.deepEqual(await migrate(fresh), ["001_users_events.sql", "002_notification_lab.sql", "003_event_name_fts.sql", "004_event_name_trgm.sql"]);
     assert.deepEqual(await migrate(fresh), [], "second run is a no-op");
     const tables = (await fresh.query<{ t: string }>("SELECT table_name AS t FROM information_schema.tables WHERE table_schema = 'public' ORDER BY 1")).rows.map((r) => r.t);
     assert.deepEqual(tables, ["events", "mock_provider_sent", "notification_deliveries", "schema_migrations", "users"]);
     // concurrent runners serialize on the advisory lock
     await fresh.query("DROP TABLE events, users, notification_deliveries, mock_provider_sent, schema_migrations; DROP FUNCTION set_updated_at()");
     const runs = await Promise.all([migrate(fresh), migrate(fresh)]);
-    assert.equal(runs.flat().length, 3, "exactly one runner applied each file (3 files, no double application)");
+    assert.equal(runs.flat().length, 4, "exactly one runner applied each file (4 files, no double application)");
     await fresh.query("UPDATE schema_migrations SET checksum = 'tampered'");
     await assert.rejects(migrate(fresh), /modified after being applied/);
   } finally {

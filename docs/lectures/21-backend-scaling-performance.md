@@ -4,7 +4,7 @@
 - Playlist position: 21 (course label 21.1; Part 2 is a separate subsequent learning milestone).
 - Learning session: 2026-11-25; documentation authorized 2026-11-26.
 - Learning status: Complete (explicit GitHub upload request).
-- Implementation status: Not started.
+- Implementation status: Awaiting learner review (evidence appended below; owner confirmation pending).
 - Source availability: the learning session identified the video and used chapter headings and available transcript excerpts; the full original transcript/recording was not accessible or independently reviewed. The explanations, diagrams, numerical examples and assignment below are supplementary teaching material, not a verbatim transcript or claim of exact coverage.
 
 ## Learning objectives
@@ -180,11 +180,60 @@ Measure before optimizing: define target -> baseline -> diagnose -> change one l
 - [x] Conceptual notes, discussion and assignment documented.
 - [x] Learning status updated independently in docs/PROGRESS.md.
 
-## Implementation evidence (coding agent; initially pending)
+## Implementation evidence (coding agent)
 
-No code, tests or benchmarks were executed as part of this documentation session. Append actual evidence here, preserving the teaching material.
+Branch `feat/lecture-21-performance`; decision record [ADR-020](../decisions/020-list-substring-trigram-index.md). Everything below was measured in this session; no number is estimated.
 
-- [ ] Implementation or reproducible experiment.
-- [ ] Acceptance criteria demonstrated.
-- [ ] Negative cases and regression checks as applicable.
-- [ ] Implementation progress updated and learner confirmed.
+### Environment (2026-11-26)
+- Linux 7.0, 12 logical CPUs, 23 GB RAM, **shared developer machine** (other projects' containers and a browser were running; load average 6–17 during runs). Every number is therefore noisy; repeats are shown and only large, repeatable effects are claimed.
+- Node v24.22.1, PostgreSQL 17 (Docker `postgres:17`, default config), Redis 7 (cache, 64 MB LRU). API: single process, pool `max: 10`, `LOG_LEVEL=warn`. Load generator on the same host.
+- Dataset: database `eventhub_bench` (created by `npm run bench:seed`), 300,000 synthetic events, names `"<Category> <City> <md5>"` (8 categories x 10 cities), `seats` uniform 0..100000, table+indexes 71 MB. `q=conference` matches 37,500 rows (18,785 with `minSeats=50000`); the selective needle (an md5 prefix) matches 1 row.
+- Local port note: `56379` was already used by another project, so the cache Redis was moved with a new optional `EVENTHUB_REDIS_PORT` (compose default unchanged; local `.env` sets 56381).
+
+### Tool and method
+`experiments/bench/load.ts` (native Node, no download; k6 not installed) is a **closed-loop** generator: N virtual users, each sends its next request when the previous finishes. Offered load equals achieved load, so it cannot show collapse beyond saturation the way an open-loop/arrival-rate test can. Warm-up excluded, nearest-rank percentiles over every sample, status classes counted separately (2xx/429/5xx/timeout). Its own CPU was 1–75% of one core (listed in raw output); the highest-throughput cache scenarios (60–75%) are close to the limit of a single-threaded generator, so those numbers are lower bounds of the server. `experiments/bench/run-single.sh` starts one API on the bench DB and runs the scenarios.
+
+Commands: `ROWS=300000 npm run bench:seed`; `LABEL=baseline CACHE=true DURATION_S=10 WARMUP_S=3 ./experiments/bench/run-single.sh list-selective:10 ...`.
+
+**Discarded run (kept for honesty):** the first baseline was taken while a second runner overlapped and the host was loaded; it showed ~10x slower numbers and some 503s (5xx) that I could not reproduce on a quiet rerun, so it was thrown away and the cause is unproven (I suspect pool acquisition timeouts under CPU starvation; not verified). All results below are the clean reruns.
+
+### Baseline vs after (10 virtual users, 10 s measured, 3 s warm-up, 2 repeats; all responses 2xx, 0 x 429/5xx/timeouts)
+| Scenario | Baseline r1 / r2 (ok-req/s, p50, p95, p99 ms) | After r1 / r2 |
+| --- | --- | --- |
+| `GET /api/v1/events?q=<selective>` | 18.6 / 19.2; p50 553/533; p95 712/664; p99 792/720 | **1061 / 975**; p50 9.1/9.9; p95 13.4/14.6; p99 15.9/18.9 |
+| `...?q=conference&minSeats=50000` | 61 / 66; p50 151/139; p95 274/245; p99 313/287 | 118 / 110; p50 83/87; p95 112/127; p99 146/156 |
+| same, 50 users | 69 / 57; p50 761/972; p99 990/1276 | 116 / 146; p50 446/350; p99 546/472 |
+| `GET /api/v1/events` (no filter) | 409 / 331; p50 24/30 | 215 / 204; p50 45/48 (*) |
+| `GET /api/v1/events/search?q=conference` (FTS, unchanged) | 43 / 36; p50 225/261 | 30 / 33; p50 325/296 (*) |
+| `GET /events/:id`, 200 hot ids, cache warm | 15187 / 11735; p50 0.43/0.84 | 4087 / 8196 (*) |
+| `GET /events/:id`, random ids over 300k | 6391 / 3928 | 1939 / 5182 (*) |
+
+(*) These rows use code paths the change does not touch and still moved by up to 2-4x between runs, which is the size of the host noise. A direct interleaved A/B for the unfiltered list (3 runs each, 8 s) gave **256/239/230 ok-req/s with the new code and 219/241/191 with the old code**, i.e. no measurable regression. Treat any difference below roughly 2x on this machine as noise.
+
+Cache hit vs miss for event detail (labelled separately, 10 users): warm cache, hot ids 15187 / 11735 ok-req/s (p50 0.43 / 0.84 ms) versus cache disabled (`CACHE_ENABLED=false`, every read hits PostgreSQL) 7957 / 5806 ok-req/s (p50 1.23 / 1.66 ms). Random ids over all rows (mostly first-touch misses) 6391 / 3928. Detail is not the bottleneck: both variants are sub-5 ms at p99.
+
+### Investigation (evidence for the chosen change)
+- **N+1: not applicable.** `events` rows are returned as `{id, name, seats}`; no organizer join or per-row follow-up query exists. Each list request issues 4 statements on one connection (`BEGIN`, `count(*)`, page `SELECT`, `COMMIT`) for a consistent snapshot, a constant 4 round trips, not 1+N.
+- **EXPLAIN (ANALYZE, BUFFERS), bench DB:** unfiltered count: parallel index-only scan, ~12 ms. Selective needle count: parallel seq scan, 53 ms, 4286 buffers; page query with `ORDER BY id LIMIT 10`: primary-key scan, 116 ms, 5108 buffers (the planner walks ids hoping to hit 10 matches early). `q=conference AND seats>=50000` count: parallel seq scan, ~28 ms.
+- After `CREATE INDEX ... USING GIN (lower(name) gin_trgm_ops)` (tried first in a rolled-back transaction): selective count 0.50 ms, selective page 0.45 ms, broad count 21.6 ms (Bitmap Heap Scan over 18,785 matches).
+- **Pool:** at 50 users on the heavy query latency rises about 5x while throughput barely moves, which is queueing (10 pool slots, CPU-bound queries), not a pool-size problem: raising the pool would only add concurrent scans to a 12-core host that is already busy. No pool change made. DB indicators beyond latency (CPU of the Postgres container, `pg_stat_activity`) were not systematically captured; this is a limitation.
+- Not changed: broad needles still scan ~19k matching rows; `count(*)` per page remains. Candidates for later: keyset pagination, dropping the exact total, caching list pages. None implemented.
+
+### Change and regression checks
+- `migrations/004_event_name_trgm.sql` (`pg_trgm` + GIN on `lower(name)`); `PgEventRepository` predicate rewritten to an escaped `LIKE` with identical semantics (`%`, `_`, `\` literal).
+- New `test/list-substring.test.ts` (case-insensitive, 3+ char and 2-char needles, Arabic, literal `% _ \`, `j%t` must not match, minSeats combination). Migration-list assertions in `test/postgres.test.ts` updated (3 -> 4 files).
+- `npm test`: an earlier run had 340/341 (the stale migration-count assertion, then fixed); final full run: 341 tests, 341 passed, 0 failed. Pre-existing intermittent timing tests (shutdown SIGINT, jobs "provider slower than the processing timeout") failed in two separate baseline runs before any change (337 tests: 1 failure each time, different test), so a failure there is not evidence of regression. `npm run typecheck`: clean.
+- Negative/edge cases: wildcard characters in input, needle shorter than the trigram size, empty result, 429/5xx/timeouts recorded (all 0 in the clean runs).
+
+### Capacity limits observed (this machine, single API process, closed loop)
+Heavy unfiltered-substring list ~110-146 ok-req/s; selective list ~1000 ok-req/s; cached detail 12-15k ok-req/s (generator-limited); event detail without cache 6-8k ok-req/s. Rate limits were not triggered (public GETs are not rate limited; auth endpoints were not benchmarked).
+
+### Remaining issues / caveats
+- Noisy shared host, two repeats only; no confidence intervals. A dedicated machine and more repeats would be needed for publishable numbers.
+- Closed-loop generator on the same host; no open-loop arrival test; no failure-injection run (pool timeout / dependency degradation) was performed.
+- Booking write endpoints do not exist, so there were no inventory invariants to regression-check.
+
+- [x] Implementation or reproducible experiment.
+- [x] Acceptance criteria demonstrated (see sections above); see caveats for what was not done.
+- [x] Negative cases and regression checks as applicable.
+- [ ] Implementation progress updated and learner confirmed. (owner confirmation pending)
