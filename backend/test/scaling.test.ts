@@ -92,3 +92,55 @@ test("config: TRUSTED_PROXIES and DB_POOL_MAX are validated and default safe", (
   assert.equal(parseDatabaseConfig({ ...db, DB_POOL_MAX: "25" }).poolMax, 25);
   for (const bad of ["0", "101", "x", ""]) assert.throws(() => parseDatabaseConfig({ ...db, DB_POOL_MAX: bad }), ConfigError, bad);
 });
+
+// ---------- shared rate limiter ----------
+import { PgWindowLimiter } from "../src/modules/auth/pg-limiter.ts";
+
+test("PgWindowLimiter: two replicas share ONE budget (not N x max); window resets; clear works; buckets are isolated", async () => {
+  await pool.query("TRUNCATE rate_limits");
+  let t = 1_000_000;
+  const a = new PgWindowLimiter(pool, "t", () => t, 3, 60_000);
+  const b = new PgWindowLimiter(pool, "t", () => t, 3, 60_000);
+  const other = new PgWindowLimiter(pool, "other", () => t, 3, 60_000);
+  await a.fail("k"); await b.fail("k"); await a.fail("k");
+  assert.equal(await b.retryAfter("k"), 60, "3 failures spread over two replicas lock the key on both");
+  assert.equal(await other.retryAfter("k"), 0, "another bucket is untouched");
+  assert.equal(await a.retryAfter("k2"), 0, "another key is untouched");
+  t += 30_000;
+  assert.equal(await a.retryAfter("k"), 30, "Retry-After counts down");
+  t += 31_000;
+  assert.equal(await b.retryAfter("k"), 0, "window over");
+  await a.fail("k");
+  assert.equal(await b.retryAfter("k"), 0, "a new window starts at count 1");
+  await a.fail("k"); await a.fail("k");
+  assert.ok((await b.retryAfter("k")) > 0);
+  await b.clear("k");
+  assert.equal(await a.retryAfter("k"), 0);
+});
+
+test("PgWindowLimiter: concurrent failures from many replicas are counted atomically (no lost updates)", async () => {
+  await pool.query("TRUNCATE rate_limits");
+  const ls = Array.from({ length: 4 }, () => new PgWindowLimiter(pool, "c", () => 5_000_000, 1000, 60_000));
+  await Promise.all(Array.from({ length: 40 }, (_, i) => ls[i % 4]!.fail("same")));
+  const n = (await pool.query<{ count: number }>("SELECT count FROM rate_limits WHERE bucket = 'c' AND key = 'same'")).rows[0]!.count;
+  assert.equal(n, 40);
+});
+
+test("login lockout is shared across replicas (AuthService over PgWindowLimiter)", async () => {
+  await pool.query("TRUNCATE rate_limits");
+  const { AccountService } = await import("../src/modules/auth/service.ts");
+  const mk = () => {
+    const auth: AuthService = new AuthService(new PgUserRepository(pool), new PgSessionStore(pool), {
+      login: new PgWindowLimiter(pool, "login", () => auth.now()),
+      address: new PgWindowLimiter(pool, "login-address", () => auth.now(), 20, 60_000),
+      register: new PgWindowLimiter(pool, "register", () => auth.now(), 20, 60_000),
+    });
+    return new AccountService(auth);
+  };
+  const r1 = mk(), r2 = mk(), r3 = mk();
+  const outcomes: string[] = [];
+  for (const r of [r1, r2, r3, r1, r2, r3, r1]) outcomes.push((await r.login({ username: "ghost_user", password: PW }, "9.9.9.9")).ok ? "ok" : "x");
+  const sixth = await r3.login({ username: "ghost_user", password: PW }, "9.9.9.9");
+  assert.equal(sixth.ok, false);
+  assert.equal((sixth as { kind: string }).kind, "rate-limited", "after 5 failures spread over 3 replicas the next attempt is limited on ANY replica");
+});

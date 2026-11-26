@@ -10,7 +10,7 @@ set -a; . ./.env; set +a
 RUN=/tmp/eventhub-replicas; mkdir -p "$RUN"
 start_one() {
   local i=$1
-  PORT=$((8080 + i)) SEED_DEMO_USERS=0 TRUSTED_PROXIES=127.0.0.1 LOG_LEVEL="${LOG_LEVEL:-warn}" \
+  PORT=$((8080 + i)) SEED_DEMO_USERS=0 TRUSTED_PROXIES=127.0.0.2 LOG_LEVEL="${LOG_LEVEL:-warn}" \
     nohup node --import tsx src/server.ts >"$RUN/r$i.log" 2>&1 &
   echo $! >"$RUN/r$i.pid"
 }

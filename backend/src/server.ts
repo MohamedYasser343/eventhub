@@ -9,6 +9,7 @@ import { cache, cacheTtlSeconds } from "./cache.ts";
 import { loadConfig, parseServerConfig } from "./config.ts";
 import { seedDemo } from "./db/seed.ts";
 import { PgUserRepository } from "./modules/auth/user-repository.ts";
+import { PgWindowLimiter } from "./modules/auth/pg-limiter.ts";
 import { PgSessionStore } from "./modules/auth/session-store.ts";
 import { createProtect, forbidden, ignoredBodyHeaders, sendJson } from "./http/app.ts";
 import type { AppHandler, RouteContext } from "./http/app.ts";
@@ -48,7 +49,13 @@ if (config.logRequests) logSink.write = (line) => console.log(line);
 // ---------- composition root ----------
 // The only place where concrete classes are chosen and wired, by hand (no DI
 // container). Dependencies point inward: controller -> service -> repository.
-export const auth = new AuthService(new PgUserRepository(pool), new PgSessionStore(pool)); // lecture 22: shared sessions
+// Lecture 22: sessions AND rate-limit counters live in PostgreSQL, so every replica shares them.
+// The clock is read through `auth.now` (injectable in tests), hence the closures.
+export const auth: AuthService = new AuthService(new PgUserRepository(pool), new PgSessionStore(pool), {
+  login: new PgWindowLimiter(pool, "login", () => auth.now()),
+  address: new PgWindowLimiter(pool, "login-address", () => auth.now(), 20, 60_000),
+  register: new PgWindowLimiter(pool, "register", () => auth.now(), 20, 60_000),
+});
 // Cache failures are logged as ids + operation only (never keys' values or the URL).
 export const publicEventCache = new PublicEventCache(cache, cacheTtlSeconds, (what, id) =>
   log("warn", "cache.degraded", { cache: what, eventId: id }),

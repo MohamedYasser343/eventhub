@@ -26,7 +26,7 @@ beforeEach(() => {
   now = Date.now();
   auth.now = () => now;
   // Every test starts from empty limiter state: all requests come from 127.0.0.1.
-  for (const l of [auth.limiter, auth.addressLimiter, auth.registerLimiter]) (l as unknown as { hits: Map<string, unknown> }).hits.clear();
+  return pool.query("TRUNCATE rate_limits"); // counters live in PostgreSQL since lecture 22
 });
 afterEach(() => {
   auth.now = Date.now;

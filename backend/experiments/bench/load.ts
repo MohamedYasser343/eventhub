@@ -21,6 +21,7 @@ const WARMUP_MS = Number(env("WARMUP_S", "5")) * 1000;
 const TIMEOUT_MS = Number(env("TIMEOUT_MS", "10000"));
 const ROWS = Number(env("ROWS", "300000"));
 const LABEL = env("LABEL", "run");
+const AUTH_TOKEN = process.env["AUTH_TOKEN"]; // synthetic bearer token for scenario "me"
 if (![VUS, DURATION_MS, WARMUP_MS, TIMEOUT_MS, ROWS].every((n) => Number.isFinite(n) && n >= 0) || VUS < 1) throw new Error("bad numeric setting");
 
 const rnd = (n: number) => 1 + Math.floor(Math.random() * n);
@@ -30,6 +31,7 @@ const SCENARIOS: Record<string, () => string> = {
   "list-selective": () => `/api/v1/events?q=${selectiveToken}&limit=10`,
   "list-broad": () => "/api/v1/events?q=conference&minSeats=50000&limit=10",
   "search-broad": () => "/api/v1/events/search?q=conference&limit=10",
+  me: () => "/api/v1/auth/me", // needs AUTH_TOKEN: measures the authenticated-request path (session + user lookup)
   "detail-hot": () => `/api/v1/events/${rnd(200)}`, // 200 distinct ids: cache-friendly
   "detail-random": () => `/api/v1/events/${rnd(ROWS)}`, // spread over every row: mostly misses at first
   // mixed-duration workload (lecture 22): mostly cheap cached reads plus a heavy counting query
@@ -43,17 +45,18 @@ type Outcome = "2xx" | "3xx" | "4xx" | "429" | "5xx" | "timeout" | "error";
 const samples: number[] = []; // latency ms of every measured request that got a response
 const counts: Record<Outcome, number> = { "2xx": 0, "3xx": 0, "4xx": 0, "429": 0, "5xx": 0, timeout: 0, error: 0 };
 const upstreams = new Map<string, number>();
+const badSamples: string[] = []; // first few non-2xx responses, to explain them
 
-function once(path: string): Promise<{ outcome: Outcome; ms: number; upstream?: string }> {
+function once(path: string): Promise<{ outcome: Outcome; ms: number; upstream?: string; status?: number; path?: string }> {
   const start = performance.now();
   return new Promise((resolve) => {
-    const req = http.request({ host: BASE.hostname, port: BASE.port, path, agent, method: "GET", timeout: TIMEOUT_MS }, (res) => {
+    const req = http.request({ host: BASE.hostname, port: BASE.port, path, agent, method: "GET", timeout: TIMEOUT_MS, headers: AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {} }, (res) => {
       res.resume();
       res.on("end", () => {
         const s = res.statusCode ?? 0;
         const outcome: Outcome = s === 429 ? "429" : s >= 500 ? "5xx" : s >= 400 ? "4xx" : s >= 300 ? "3xx" : "2xx";
         const up = res.headers["x-upstream"];
-        resolve({ outcome, ms: performance.now() - start, upstream: typeof up === "string" ? up : undefined });
+        resolve({ outcome, ms: performance.now() - start, upstream: typeof up === "string" ? up : undefined, status: s, path });
       });
     });
     req.on("timeout", () => {
@@ -77,6 +80,7 @@ async function vu(): Promise<void> {
     const r = await once(pick!());
     if (performance.now() < measureFrom) continue; // warm-up: discarded
     counts[r.outcome]++;
+    if (r.outcome !== "2xx" && r.outcome !== "3xx" && badSamples.length < 5) badSamples.push(`${r.status ?? r.outcome} ${r.path ?? ""} via ${r.upstream ?? "-"}`);
     if (r.outcome !== "timeout" && r.outcome !== "error") samples.push(r.ms);
     if (r.upstream) upstreams.set(r.upstream, (upstreams.get(r.upstream) ?? 0) + 1);
   }
@@ -101,5 +105,6 @@ console.log(
   `[${LABEL}] ${SCENARIO} vus=${VUS} ${secs}s: ${result.samples} samples, ${result.successRps} ok-req/s, ` +
     `p50=${result.p50}ms p95=${result.p95}ms p99=${result.p99}ms max=${result.max}ms, status=${JSON.stringify(counts)}, loadgen cpu=${result.loadGenCpuPct}% of 1 core`,
 );
+if (badSamples.length) console.log("non-2xx samples: " + badSamples.join(" | "));
 console.log("JSON " + JSON.stringify(result));
 agent.destroy();

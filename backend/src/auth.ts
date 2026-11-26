@@ -90,6 +90,19 @@ export class FixedWindowLimiter {
   }
 }
 
+// Lecture 22: what the account service needs from a limiter. The in-memory class above satisfies it
+// synchronously; PgWindowLimiter (modules/auth/pg-limiter.ts) is shared by every replica.
+export interface Limiter {
+  retryAfter(key: string): number | Promise<number>;
+  fail(key: string): void | Promise<void>;
+  clear(key: string): void | Promise<void>;
+}
+export interface Limiters {
+  login: Limiter; // failed logins per address|username
+  address: Limiter; // failed logins per address
+  register: Limiter; // registrations per address
+}
+
 // ---------- the service ----------
 export type Registration =
   | { ok: true; user: User }
@@ -136,15 +149,22 @@ export class AuthService {
   // Lecture 20: three independent limits. The per-(address, username) one stops guessing ONE
   // account; the per-address one stops one address spraying many usernames (each try costs a scrypt
   // run); the registration one bounds account creation (scrypt + an INSERT per request).
-  readonly limiter = new FixedWindowLimiter(() => this.now()); // failed logins per address|username
-  readonly addressLimiter = new FixedWindowLimiter(() => this.now(), 20, 60_000); // failed logins per address
-  readonly registerLimiter = new FixedWindowLimiter(() => this.now(), 20, 60_000); // registrations per address
+  readonly limiter: Limiter; // failed logins per address|username
+  readonly addressLimiter: Limiter; // failed logins per address
+  readonly registerLimiter: Limiter; // registrations per address
   private lastSweep = 0;
 
   constructor(
     private readonly users: UserRepository,
     private readonly sessions: SessionStore = new InMemorySessionStore(),
-  ) {}
+    limiters?: Limiters,
+  ) {
+    // Default: per-process memory (unit tests). The server injects PostgreSQL-backed limiters so that
+    // the limits hold across replicas (lecture 22, ADR-021).
+    this.limiter = limiters?.login ?? new FixedWindowLimiter(() => this.now());
+    this.addressLimiter = limiters?.address ?? new FixedWindowLimiter(() => this.now(), 20, 60_000);
+    this.registerLimiter = limiters?.register ?? new FixedWindowLimiter(() => this.now(), 20, 60_000);
+  }
 
   // Trusted path (startup seed, tests). There is deliberately no HTTP route to set a role.
   // The database's unique index decides duplicates, so concurrent registrations are safe.
