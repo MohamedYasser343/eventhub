@@ -121,6 +121,9 @@ export interface SessionStore {
   get(tokenHash: string): Promise<SessionRecord | undefined>;
   delete(tokenHash: string): Promise<void>;
   deleteExpired(now: number): Promise<void>;
+  // Optional fast path: the session AND its user in one round trip (PostgreSQL store). Without it the
+  // service does two lookups. Semantics are identical: the user row is read fresh on every request.
+  getWithUser?(tokenHash: string): Promise<{ expiresAt: number; user: User | undefined } | undefined>;
   readonly size?: number; // in-memory store only (tests)
 }
 export class InMemorySessionStore implements SessionStore {
@@ -214,6 +217,15 @@ export class AuthService {
   // Role is read from the user store on every request (trusted, never from the client).
   async authenticate(token: string): Promise<User | null> {
     const key = sha(token);
+    if (this.sessions.getWithUser) {
+      const hit = await this.sessions.getWithUser(key);
+      if (!hit) return null;
+      if (hit.expiresAt <= this.now()) {
+        await this.sessions.delete(key);
+        return null;
+      }
+      return hit.user ?? null;
+    }
     const s = await this.sessions.get(key);
     if (!s) return null;
     if (s.expiresAt <= this.now()) {
