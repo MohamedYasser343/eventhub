@@ -10,11 +10,11 @@ pg.types.setTypeParser(20, (v) => {
 });
 
 // Lecture 17: validated by the central config module (exits with a key-level message if invalid).
-const { databaseUrl: url } = loadConfig(parseDatabaseConfig);
+const { databaseUrl: url, poolMax } = loadConfig(parseDatabaseConfig);
 
 // One bounded pool for the process. When all connections are busy a caller waits
 // (backpressure) and fails after connectionTimeoutMillis instead of piling up.
-export const pool = new pg.Pool({ connectionString: url, max: 10, connectionTimeoutMillis: 2_000 });
+export const pool = new pg.Pool({ connectionString: url, max: poolMax, connectionTimeoutMillis: 2_000 });
 // An idle client dying must not crash the process; never log the connection string.
 pool.on("error", () => {});
 

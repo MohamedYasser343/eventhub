@@ -149,7 +149,7 @@ test("sessions live in one instance's memory: a new instance (restart) or anothe
   const a = new AuthService(new PgUserRepository(pool));
   const created = await a.createUser(uname(), PW);
   assert.ok(created.ok);
-  const { token } = a.createSession(created.user.id);
+  const { token } = await a.createSession(created.user.id);
   assert.ok(await a.authenticate(token));
   assert.equal(await new AuthService(new PgUserRepository(pool)).authenticate(token), null);
 });

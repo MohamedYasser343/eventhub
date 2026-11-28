@@ -13,7 +13,7 @@ export const SEED: EventItem[] = [
 // sure the schema is migrated. Call once per test file, before creating any user.
 export async function resetAll(): Promise<void> {
   await migrate(pool);
-  await pool.query("TRUNCATE events, users RESTART IDENTITY CASCADE");
+  await pool.query("TRUNCATE events, users, sessions, rate_limits RESTART IDENTITY CASCADE");
   await clearEventCache();
 }
 

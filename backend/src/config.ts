@@ -8,6 +8,7 @@
 // error (never a silent fallback). Error messages name the KEY and the rule, never the value:
 // values may carry passwords (connection URLs).
 
+import { isIP } from "node:net";
 import { LOG_LEVELS } from "./observability/logger.ts";
 import type { LogLevel } from "./observability/logger.ts";
 
@@ -108,11 +109,14 @@ export type AppEnv = (typeof APP_ENVS)[number];
 // ---------- database (API, worker, migrate, seed) ----------
 export interface DatabaseConfig {
   databaseUrl: string;
+  /** Lecture 22: per-PROCESS pool bound. Total possible connections = replicas x this (+ worker, admin, tests). */
+  poolMax: number;
 }
 export function parseDatabaseConfig(env: Env): DatabaseConfig {
   const r = new Reader(env);
   const databaseUrl = r.requiredString("DATABASE_URL", isPostgresUrl, "must be a postgres:// or postgresql:// URL");
-  return r.done({ databaseUrl });
+  const poolMax = r.int("DB_POOL_MAX", 10, 1, 100);
+  return r.done({ databaseUrl, poolMax });
 }
 
 // ---------- cache (lecture 13) + its feature flag ----------
@@ -144,6 +148,8 @@ export interface ServerConfig {
   shutdownTimeoutMs: number;
   /** Lecture 19: how long the listener stays open (readiness already "draining") before it closes. 0 = off. */
   shutdownDrainDelayMs: number;
+  /** Lecture 22: IP addresses of reverse proxies whose X-Forwarded-For may be believed. Empty (default) = never trust it. */
+  trustedProxies: readonly string[];
 }
 const readShutdownTimeout = (r: Reader): number => r.int("SHUTDOWN_TIMEOUT_MS", 10_000, 1, 600_000);
 export function parseServerConfig(env: Env): ServerConfig {
@@ -160,7 +166,18 @@ export function parseServerConfig(env: Env): ServerConfig {
   const shutdownDrainDelayMs = r.int("SHUTDOWN_DRAIN_DELAY_MS", 0, 0, 600_000);
   // Cross-field rule: the drain delay is spent INSIDE the deadline, so it must leave room for the real drain.
   if (shutdownDrainDelayMs >= shutdownTimeoutMs) r.problems.push("SHUTDOWN_DRAIN_DELAY_MS must be smaller than SHUTDOWN_TIMEOUT_MS");
-  return r.done({ appEnv, port, corsOrigin, logRequests, logLevel, seedDemoUsers, shutdownTimeoutMs, shutdownDrainDelayMs });
+  // Lecture 22: comma-separated literal IPs (no hostnames, no CIDR, at most 16). A proxy you list is trusted to set
+  // X-Forwarded-For truthfully; any other peer's header is ignored (clientAddress in http/context.ts).
+  const proxiesRaw = r.optionalString(
+    "TRUSTED_PROXIES",
+    (v) => {
+      const parts = v.split(",").map((p) => p.trim());
+      return parts.length <= 16 && parts.every((p) => isIP(p) !== 0);
+    },
+    "must be 1-16 comma-separated IP addresses (not hostnames)",
+  );
+  const trustedProxies = proxiesRaw ? proxiesRaw.split(",").map((p) => p.trim()) : [];
+  return r.done({ appEnv, port, corsOrigin, logRequests, logLevel, seedDemoUsers, shutdownTimeoutMs, shutdownDrainDelayMs, trustedProxies });
 }
 
 // ---------- queue producer / worker (lecture 14; its OWN Redis, never the cache's) ----------

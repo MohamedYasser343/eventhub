@@ -26,7 +26,7 @@ beforeEach(() => {
   now = Date.now();
   auth.now = () => now;
   // Every test starts from empty limiter state: all requests come from 127.0.0.1.
-  for (const l of [auth.limiter, auth.addressLimiter, auth.registerLimiter]) (l as unknown as { hits: Map<string, unknown> }).hits.clear();
+  return pool.query("TRUNCATE rate_limits"); // counters live in PostgreSQL since lecture 22
 });
 afterEach(() => {
   auth.now = Date.now;
@@ -134,15 +134,17 @@ test("register: invalid bodies do not consume the budget (they never reach scryp
 });
 
 // ---------- sessions ----------
-test("expired sessions are swept when new ones are created, so the map cannot grow forever", async () => {
+test("expired sessions are swept when new ones are created, so the table cannot grow forever", async () => {
   const u = uname();
   await post("/auth/register", { username: u, password: PW });
-  for (let i = 0; i < 5; i++) auth.createSession(1);
-  const before = auth.sessionCount;
-  assert.ok(before >= 5);
+  const userId = (await pool.query<{ id: number }>("SELECT id FROM users WHERE lower(username) = $1", [u.toLowerCase()])).rows[0]!.id;
+  const count = async () => Number((await pool.query<{ n: string }>("SELECT count(*) AS n FROM sessions")).rows[0]!.n);
+  for (let i = 0; i < 5; i++) await auth.createSession(userId);
+  assert.ok((await count()) >= 5);
   now += 16 * 60_000; // past the 15 minute TTL; nobody presents the old tokens again
-  auth.createSession(1);
-  assert.equal(auth.sessionCount, 1);
+  await auth.createSession(userId);
+  for (let i = 0; i < 50 && (await count()) !== 1; i++) await new Promise((r) => setTimeout(r, 20)); // the sweep runs in the background
+  assert.equal(await count(), 1);
 });
 
 // ---------- response headers ----------
