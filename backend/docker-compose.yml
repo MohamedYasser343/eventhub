@@ -22,7 +22,7 @@ services:
     network_mode: bridge
     command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
     ports:
-      - "127.0.0.1:56379:6379"
+      - "127.0.0.1:${EVENTHUB_REDIS_PORT:-56379}:6379"
   # Lecture 14: DURABLE job queue, deliberately separate from the cache above. Pending
   # jobs must not be evicted (noeviction: a full Redis refuses writes instead of dropping
   # jobs) and should survive a restart (AOF, fsync every second: up to ~1 s of acknowledged

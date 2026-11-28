@@ -29,8 +29,10 @@ export interface EventRepository {
 const SORT_SQL = { id: "id", name: 'name COLLATE "C"', seats: "seats" } as const;
 
 const COLUMNS = "id, name, seats";
-// Case-insensitive substring, with no LIKE wildcards to escape (% and _ are literal).
-const MATCH = "position(lower($1) in lower(name)) > 0";
+// Case-insensitive substring in which % _ and \\ in the input stay LITERAL (they are escaped before
+// being used as a LIKE pattern). Lecture 21: was position(lower($1) in lower(name)) > 0, which no index can
+// serve; this form is served by the trigram index of migration 004 (needles of 3+ characters).
+const MATCH = "lower(name) LIKE '%' || replace(replace(replace(lower($1), '\\', '\\\\'), '%', '\\%'), '_', '\\_') || '%'";
 
 export class PgEventRepository implements EventRepository {
   constructor(private readonly pool: pg.Pool) {}
