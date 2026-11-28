@@ -4,7 +4,7 @@
 - Playlist position: 23 (course video number 22; follows both scaling parts).
 - Date: 2026-11-28 (documentation).
 - Learning status: Complete (explicit GitHub upload request).
-- Implementation status: Awaiting learner review (implemented 2026-11-28; see the evidence section).
+- Implementation status: Complete (owner confirmed 2026-11-28; see the evidence section).
 - Source availability: title and ID rechecked against third-party transcript-derived material. The full recording and full transcript were not independently reviewed for this commit. This is a record of the learning discussion, not a verbatim transcript. The Node.js and PostgreSQL exercises, production guidance and booking design below are supplementary applications.
 
 ## Learning objectives
@@ -246,4 +246,4 @@ Answer to the lecture question: a 10 s synchronous calculation on the main threa
 - [x] Implementation or reproducible experiment.
 - [x] Acceptance criteria demonstrated (except the performance metrics listed under limitations).
 - [x] Negative cases and regression checks.
-- [ ] Learner confirmation (implementation status stays "awaiting learner review").
+- [x] Learner confirmation (owner confirmed 2026-11-28).

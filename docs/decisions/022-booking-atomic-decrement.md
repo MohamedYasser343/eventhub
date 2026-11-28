@@ -1,6 +1,6 @@
 # ADR-022: Bookings via an atomic conditional decrement in PostgreSQL
 
-Status: Proposed (awaiting owner confirmation)
+Status: Accepted (owner confirmed 2026-11-28)
 Date: 2026-11-28
 Related lecture: [23 — Concurrency & Parallelism](../lectures/23-concurrency-parallelism.md)
 
