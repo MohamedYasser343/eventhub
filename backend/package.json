@@ -16,6 +16,7 @@
     "experiment:search": "tsx --env-file-if-exists=.env experiments/search-compare.ts",
     "experiment:observability": "tsx --env-file-if-exists=.env experiments/observability-demo.ts",
     "experiment:cache": "tsx --env-file-if-exists=.env experiments/cache-latency.ts",
+    "experiment:concurrency": "tsx --env-file-if-exists=.env experiments/concurrency.ts",
     "bench:seed": "tsx --env-file-if-exists=.env experiments/bench/seed.ts",
     "bench:load": "tsx experiments/bench/load.ts"
   },

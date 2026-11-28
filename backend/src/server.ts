@@ -35,6 +35,9 @@ import { PublicEventCache } from "./modules/events/public-cache.ts";
 import { createTicketsController } from "./modules/tickets/controller.ts";
 import { InMemoryTicketRepository } from "./modules/tickets/repository.ts";
 import { TicketService } from "./modules/tickets/service.ts";
+import { createBookingsController } from "./modules/bookings/controller.ts";
+import { PgBookingRepository } from "./modules/bookings/repository.ts";
+import { BookingService } from "./modules/bookings/service.ts";
 
 export type { EventItem, RouteContext };
 export { logSink }; // moved to observability/logger.ts in lecture 18; still importable from here
@@ -62,6 +65,8 @@ export const publicEventCache = new PublicEventCache(cache, cacheTtlSeconds, (wh
 );
 const eventService = new EventService(new PgEventRepository(pool), publicEventCache);
 const ticketService = new TicketService(new InMemoryTicketRepository(ticketsByUser), eventService);
+// Lecture 23: seats are decremented and the booking row written in one PostgreSQL transaction.
+const bookingsCtl = createBookingsController(new BookingService(new PgBookingRepository(pool), publicEventCache));
 const accountService = new AccountService(auth);
 const protect = createProtect(auth);
 const eventsCtl = createEventsController(eventService);
@@ -169,6 +174,8 @@ function registerEventRoutes(r: Registrar<AppHandler>, v1: boolean): void {
     r.add("OPTIONS", "/me/tickets", optionsHandler);
     r.add("GET", "/tickets/:id", protect(ticketsCtl.byId));
     r.add("OPTIONS", "/tickets/:id", optionsHandler);
+    r.add("POST", "/events/:id/bookings", protect(bookingsCtl.create), ID);
+    r.add("OPTIONS", "/events/:id/bookings", optionsHandler, ID);
     r.add("POST", "/bookings", bookingStub);
     r.add("OPTIONS", "/bookings", optionsHandler);
   }

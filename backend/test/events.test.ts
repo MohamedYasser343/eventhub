@@ -21,7 +21,7 @@ test("GET /events does not mutate the collection", async () => {
 });
 
 test("GET /events on an empty collection returns []", async () => {
-  await pool.query("TRUNCATE events");
+  await pool.query("TRUNCATE events CASCADE");
   try {
     const res = await fetch(`${api.base}/events`);
     assert.equal(res.status, 200);
