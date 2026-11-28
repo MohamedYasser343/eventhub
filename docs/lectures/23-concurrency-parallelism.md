@@ -4,7 +4,7 @@
 - Playlist position: 23 (course video number 22; follows both scaling parts).
 - Date: 2026-11-28 (documentation).
 - Learning status: Complete (explicit GitHub upload request).
-- Implementation status: Not started.
+- Implementation status: Awaiting learner review (implemented 2026-11-28; see the evidence section).
 - Source availability: title and ID rechecked against third-party transcript-derived material. The full recording and full transcript were not independently reviewed for this commit. This is a record of the learning discussion, not a verbatim transcript. The Node.js and PostgreSQL exercises, production guidance and booking design below are supplementary applications.
 
 ## Learning objectives
@@ -198,11 +198,52 @@ Suggested incremental exercise:
 - [x] Conceptual notes, discussion and assignment documented.
 - [x] Learning status updated independently in docs/PROGRESS.md as part of this documentation change.
 
-## Implementation evidence (coding agent; pending)
+## Implementation evidence (coding agent)
 
-No implementation changes, commands, test runs or benchmark results are claimed in this note. Record environment, expected and observed results, negative cases and regression checks here after the practical work.
+Branch `feat/lecture-23-concurrency`; decision record [ADR-022](../decisions/022-booking-atomic-decrement.md) (proposed). Owner approved the minimal route slice (booking endpoint plus `bookings` table) on 2026-11-28. Environment: Linux, 12 CPUs, Node/`tsx`, PostgreSQL in Docker on 127.0.0.1:56432, shared developer machine (numbers are noisy, single runs unless stated).
 
-- [ ] Implementation or reproducible experiment.
-- [ ] Acceptance criteria demonstrated.
-- [ ] Negative cases and regression checks.
-- [ ] Implementation progress updated and learner confirmed.
+### What was built
+- `migrations/007_bookings.sql`; `src/modules/bookings/{repository,service,controller}.ts`; route `POST /api/v1/events/:id/bookings` in `src/server.ts`.
+- Core (repository): one transaction on one checked-out connection: `UPDATE events SET seats = seats - $q WHERE id = $1 AND seats >= $q RETURNING seats`, then `INSERT INTO bookings`. Zero rows updated means 404 or sold out (a second `SELECT` tells them apart).
+- `experiments/concurrency.ts` (`npm run experiment:concurrency`): I/O overlap and CPU blocking.
+- The unsafe read-then-write race was NOT re-implemented: the lecture 12 negative control (`bookNaive`, `test/postgres.test.ts`) already reproduces the lost update and still passes. No deterministic barrier was added.
+
+### Acceptance criteria
+| Criterion | Result |
+| --- | --- |
+| 100 distinct buyers, 10 seats, one API process | 10 x 201, 90 x 409, stock 0, 10 booking rows with 10 distinct users (`test/bookings.test.ts`, passed) |
+| Same through two independent API processes (ports 48231/48232, shared PostgreSQL, 50 requests each) | exactly 10 bookings, 90 x 409, stock 0 (passed) |
+| Failure after decrement, before insert | rollback: stock back to 5, no row, connection released; next booking succeeds (via the repository hook, not over HTTP) |
+| Negative cases | 401 (bad and missing token), 404 unknown event, 422 for quantity 0, -1, 11, 1.5, "2", null, 1e9 and a non-object body, 400 malformed JSON; stock and rows unchanged; a `userId` in the body is ignored |
+| Quantities | 40 buyers asking 1-4 seats against 25: never oversold, stock = 25 - booked; a request for more than remains is refused whole |
+| Cache | public `GET /events/1` shows the new seat count right after a booking |
+| Regressions | legacy `POST /bookings` still 501; lecture 12 lab tests pass |
+
+### Experiment output (`npm run experiment:concurrency`, one representative run; three runs of part 1 agreed within ~5%)
+| I/O: 20 queries of `pg_sleep(0.08)` | Wall time |
+| --- | --- |
+| sequential | 1650 ms |
+| `Promise.all` (pool max 10, so two waves) | 214-229 ms |
+| bounded, 2 in flight | 830 ms |
+| bounded, 5 in flight | 335 ms |
+
+| CPU: 100M-iteration loop, `/health`-like probe every 20 ms | Work | Probes answered during the work | Probe latency |
+| --- | --- | --- | --- |
+| on the main thread | 557-982 ms (3 runs) | 1 | the single probe waited for the whole calculation (608-1033 ms) |
+| in a `worker_threads` worker (one fresh worker per run) | 998-1350 ms | 44-61 | p50 2 ms, max 8-13 ms |
+
+Answer to the lecture question: a 10 s synchronous calculation on the main thread delays `/health` until it finishes, on any number of cores; a worker keeps the loop free (worker start-up and transfer cost made the same calculation take about as long or longer here).
+
+### Tests
+`npm run typecheck` clean. `npm test`: 360/360 on one run; another run of the whole suite had 359/360 with `data written before an app restart is readable after it` failing (it passed in isolation twice; cause not investigated). The jobs test "provider slower than the processing timeout" also failed once in an earlier full run (flaky before this lecture). Two existing tests had to change because of migration 007 (the migration file list and table list in `postgres.test.ts`; `TRUNCATE events` became `... CASCADE` in `events.test.ts` and the bench seed because `bookings` references `events`).
+
+### Limitations
+- Only `pg_sleep` and a synthetic loop were used; no p95/p99 or CPU/memory numbers were collected for the booking endpoint under load, and no event-loop-lag metric (my first attempt with `monitorEventLoopDelay` did not record the blocked interval, so it was removed).
+- The CPU experiment uses a new worker per run, not a bounded reusable pool, and is not wired into any route.
+- No idempotency key, payments, reservation expiry or cancellation (deferred by the assignment).
+- The rollback test injects the failure at the repository, not over HTTP.
+
+- [x] Implementation or reproducible experiment.
+- [x] Acceptance criteria demonstrated (except the performance metrics listed under limitations).
+- [x] Negative cases and regression checks.
+- [ ] Learner confirmation (implementation status stays "awaiting learner review").

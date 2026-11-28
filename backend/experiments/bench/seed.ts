@@ -24,7 +24,7 @@ await admin.end();
 
 const pool = new pg.Pool({ connectionString: raw, max: 1 });
 console.log("migrations applied:", (await migrate(pool)).join(", ") || "none");
-await pool.query("TRUNCATE events RESTART IDENTITY");
+await pool.query("TRUNCATE events RESTART IDENTITY CASCADE");
 // One synthetic organizer. The hash is a placeholder that matches no password: nobody can log in as it.
 await pool.query(
   "INSERT INTO users (username, role, password_hash) VALUES ('bench_organizer', 'organizer', 'scrypt$placeholder-no-login') ON CONFLICT DO NOTHING",
