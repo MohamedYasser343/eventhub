@@ -39,9 +39,9 @@ export class AccountService {
     if (details.length > 0) return { ok: false, kind: "invalid", details };
     // Only attempts that would reach scrypt and the database count; malformed bodies are cheap.
     if (clientKey !== undefined) {
-      const wait = this.auth.registerLimiter.retryAfter(clientKey);
+      const wait = await this.auth.registerLimiter.retryAfter(clientKey);
       if (wait > 0) return { ok: false, kind: "rate-limited", retryAfter: wait };
-      this.auth.registerLimiter.fail(clientKey);
+      await this.auth.registerLimiter.fail(clientKey);
     }
     // Any "role" in the input is ignored: public registration always creates an attendee.
     const result = await this.auth.createUser(username as string, password as string, "attendee");
@@ -55,20 +55,20 @@ export class AccountService {
       return { ok: false, kind: "invalid-credentials" };
     }
     const key = `${clientKey}|${username.toLowerCase()}`;
-    const wait = Math.max(this.auth.limiter.retryAfter(key), this.auth.addressLimiter.retryAfter(clientKey));
+    const wait = Math.max(await this.auth.limiter.retryAfter(key), await this.auth.addressLimiter.retryAfter(clientKey));
     if (wait > 0) return { ok: false, kind: "rate-limited", retryAfter: wait };
     const user = await this.auth.verifyCredentials(username, password);
     if (!user) {
-      this.auth.limiter.fail(key);
-      this.auth.addressLimiter.fail(clientKey);
+      await this.auth.limiter.fail(key);
+      await this.auth.addressLimiter.fail(clientKey);
       return { ok: false, kind: "invalid-credentials" }; // same outcome for unknown user and wrong password
     }
-    this.auth.limiter.clear(key); // NOT the address counter: a valid login must not reset a spray in progress
-    const session = this.auth.createSession(user.id);
+    await this.auth.limiter.clear(key); // NOT the address counter: a valid login must not reset a spray in progress
+    const session = await this.auth.createSession(user.id);
     return { ok: true, token: session.token, expiresAt: session.expiresAt, user: pub(user) };
   }
 
-  logout(token: string): void {
-    this.auth.destroySession(token); // server-side revocation: the old token is dead immediately
+  async logout(token: string): Promise<void> {
+    await this.auth.destroySession(token); // server-side revocation: the old token is dead immediately
   }
 }

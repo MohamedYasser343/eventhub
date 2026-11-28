@@ -104,14 +104,14 @@ test("migrations rebuild the schema in an empty database and re-running applies 
   url.pathname = `/${name}`;
   const fresh = new pg.Pool({ connectionString: url.toString(), max: 2 });
   try {
-    assert.deepEqual(await migrate(fresh), ["001_users_events.sql", "002_notification_lab.sql", "003_event_name_fts.sql", "004_event_name_trgm.sql"]);
+    assert.deepEqual(await migrate(fresh), ["001_users_events.sql", "002_notification_lab.sql", "003_event_name_fts.sql", "004_event_name_trgm.sql", "005_sessions.sql", "006_rate_limits.sql"]);
     assert.deepEqual(await migrate(fresh), [], "second run is a no-op");
     const tables = (await fresh.query<{ t: string }>("SELECT table_name AS t FROM information_schema.tables WHERE table_schema = 'public' ORDER BY 1")).rows.map((r) => r.t);
-    assert.deepEqual(tables, ["events", "mock_provider_sent", "notification_deliveries", "schema_migrations", "users"]);
+    assert.deepEqual(tables, ["events", "mock_provider_sent", "notification_deliveries", "rate_limits", "schema_migrations", "sessions", "users"]);
     // concurrent runners serialize on the advisory lock
-    await fresh.query("DROP TABLE events, users, notification_deliveries, mock_provider_sent, schema_migrations; DROP FUNCTION set_updated_at()");
+    await fresh.query("DROP TABLE events, sessions, rate_limits, users, notification_deliveries, mock_provider_sent, schema_migrations; DROP FUNCTION set_updated_at()");
     const runs = await Promise.all([migrate(fresh), migrate(fresh)]);
-    assert.equal(runs.flat().length, 4, "exactly one runner applied each file (4 files, no double application)");
+    assert.equal(runs.flat().length, 6, "exactly one runner applied each file (6 files, no double application)");
     await fresh.query("UPDATE schema_migrations SET checksum = 'tampered'");
     await assert.rejects(migrate(fresh), /modified after being applied/);
   } finally {
@@ -206,7 +206,7 @@ test.describe("inventory lab", () => {
 });
 
 // ---------- persistence: restart the backend PROCESS, same database ----------
-test("data written before an app restart is readable after it (users included; sessions are not)", async () => {
+test("data written before an app restart is readable after it (users and, since lecture 22, sessions included)", async () => {
   await resetEvents();
   const port = 20_000 + Math.floor(Math.random() * 20_000);
   const start = () =>
@@ -242,8 +242,8 @@ test("data written before an app restart is readable after it (users included; s
     assert.match(b.out.join("\n"), /demo_organizer already exists/, "user survived: seed did not recreate it");
     const read = await fetch(`http://127.0.0.1:${port}/api/v1/events/${id}`);
     assert.deepEqual(await read.json(), { id, name: "Survives restart", seats: 4 });
-    const stale = await fetch(`http://127.0.0.1:${port}/api/v1/auth/me`, { headers: { Authorization: `Bearer ${ta.token}`, "X-Test-Anon": "1" } });
-    assert.equal(stale.status, 401, "sessions are in memory and do not survive (documented)");
+    const still = await fetch(`http://127.0.0.1:${port}/api/v1/auth/me`, { headers: { Authorization: `Bearer ${ta.token}`, "X-Test-Anon": "1" } });
+    assert.equal(still.status, 200, "lecture 22: sessions live in PostgreSQL, so another process (or a restart) accepts them (was 401 with in-memory sessions)");
     assert.equal((await login(password)).status, 200, "the persisted user can log in again with the same password");
   } finally {
     await b.stop();
